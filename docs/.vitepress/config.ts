@@ -24,6 +24,7 @@ export default defineConfig({
             { text: "Quickstart", link: "/guide/quickstart" },
             { text: "Architecture", link: "/guide/architecture" },
             { text: "Grounding model", link: "/guide/grounding" },
+            { text: "Release versioning", link: "/guide/versioning" },
           ],
         },
         {
