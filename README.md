@@ -1,5 +1,7 @@
 # GroundKit
 
+Release versioning uses NBGV commit-height previews and tag-gated RC and stable releases. See the [release versioning guide](docs/guide/versioning.md) for the version contract, helper commands, and CI behavior.
+
 GroundKit is a local-first documentation MCP for AI agents, built in .NET.
 
 GroundKit builds documentation once, stores it as portable local packages, and serves it to AI agents through MCP without depending on a hosted documentation service.
