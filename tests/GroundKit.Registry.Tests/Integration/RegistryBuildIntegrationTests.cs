@@ -34,12 +34,25 @@ public sealed class RegistryBuildIntegrationTests : IDisposable
         var repositoryRoot = FindRepositoryRoot();
         var registryPath = Path.Combine(repositoryRoot, "registry");
         var definitions = RegistryDefinitionLoader.LoadDirectory(registryPath);
+        var expectedCatalog = LibraryCatalog.StarterLibraries
+            .Where(entry => string.Equals(entry.Registry, "npm", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
-        definitions.Count.ShouldBe(20);
+        definitions.Count.ShouldBe(expectedCatalog.Length);
         definitions.ShouldAllBe(definition => definition.Registry == "npm");
         definitions.ShouldAllBe(definition => definition.Kind == SourceKind.GitRepository);
         definitions.ShouldAllBe(definition => definition.Source.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
         definitions.ShouldAllBe(definition => !string.IsNullOrWhiteSpace(definition.DocsPath));
+        definitions
+            .OrderBy(definition => definition.Name, StringComparer.OrdinalIgnoreCase)
+            .Zip(expectedCatalog)
+            .ShouldAllBe(pair =>
+                pair.First.Name == pair.Second.Name
+                && pair.First.Description == pair.Second.Description
+                && pair.First.Source == pair.Second.Repository
+                && pair.First.DocsPath == pair.Second.DocsPath
+            );
 
         var exitCode = await new RegistryApplication(
                 CreatePackageBuilder(),
