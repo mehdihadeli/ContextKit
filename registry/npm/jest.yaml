@@ -1,0 +1,7 @@
+name: jest
+description: "JavaScript testing framework"
+repository: https://github.com/jestjs/jest
+source:
+  type: git
+  url: https://github.com/jestjs/jest
+  docs_path: docs

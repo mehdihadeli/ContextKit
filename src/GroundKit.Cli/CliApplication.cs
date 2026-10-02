@@ -35,6 +35,13 @@ public sealed class CliApplication(
 
     public async Task<int> RunAsync(string[] args)
     {
+        var registryUrl = TryReadOption(args, "--registry-url");
+        if (!string.IsNullOrWhiteSpace(registryUrl))
+        {
+            Environment.SetEnvironmentVariable("GROUNDKIT_REGISTRY_URL", registryUrl);
+            args = RemoveOption(args, "--registry-url");
+        }
+
         args = NormalizeArguments(args);
 
         if (args.Length == 0)
@@ -675,6 +682,23 @@ public sealed class CliApplication(
         }
 
         return null;
+    }
+
+    private static string[] RemoveOption(IReadOnlyList<string> args, string optionName)
+    {
+        var remaining = new List<string>(args.Count);
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (string.Equals(args[index], optionName, StringComparison.OrdinalIgnoreCase))
+            {
+                index++;
+                continue;
+            }
+
+            remaining.Add(args[index]);
+        }
+
+        return [.. remaining];
     }
 
     internal static string NormalizeCommand(string command) =>

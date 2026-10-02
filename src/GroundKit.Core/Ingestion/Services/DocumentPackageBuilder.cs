@@ -86,13 +86,31 @@ public sealed class DocumentPackageBuilder(
         CancellationToken cancellationToken = default
     ) => BuildAsync(input, docsPath, cancellationToken, null, null);
 
+    public Task<BuildResult> BuildAsync(
+        string input,
+        string? docsPath,
+        CancellationToken cancellationToken,
+        string? version,
+        string? gitRef
+    ) => BuildAsync(input, docsPath, cancellationToken, version, gitRef, null, null);
+
+    public Task<BuildResult> BuildAsync(
+        string input,
+        string? docsPath,
+        CancellationToken cancellationToken,
+        string? version,
+        string? gitRef,
+        string? packageName
+    ) => BuildAsync(input, docsPath, cancellationToken, version, gitRef, packageName, null);
+
     public async Task<BuildResult> BuildAsync(
         string input,
         string? docsPath,
         CancellationToken cancellationToken,
         string? version,
         string? gitRef,
-        string? packageName = null
+        string? packageName,
+        IReadOnlyList<string>? excludePaths
     )
     {
         using var activity = GroundKitTelemetry.ActivitySource.StartActivity(
@@ -113,6 +131,7 @@ public sealed class DocumentPackageBuilder(
             DocsPath = docsPath,
             Version = version,
             Tag = gitRef ?? detectedSource.Tag,
+            ExcludePaths = excludePaths,
         };
         activity?.SetTag("groundkit.source.kind", source.Kind.ToString());
 
@@ -126,7 +145,8 @@ public sealed class DocumentPackageBuilder(
                     source.Location,
                     docsPath,
                     warnings,
-                    cancellationToken
+                    cancellationToken,
+                    source.ExcludePaths
                 ),
                 SourceKind.GitRepository => await LoadFromGitRepositoryAsync(
                     source,
@@ -285,7 +305,8 @@ public sealed class DocumentPackageBuilder(
                 clonePath,
                 docsPath,
                 warnings,
-                cancellationToken
+                cancellationToken,
+                source.ExcludePaths
             );
             return payload with { CleanupPath = clonePath };
         }
@@ -300,11 +321,12 @@ public sealed class DocumentPackageBuilder(
         string sourceRoot,
         string? docsPath,
         List<BuildWarning> warnings,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? excludePaths = null
     )
     {
         var docsRoot = ResolveDocsRoot(sourceRoot, docsPath, warnings);
-        var files = EnumerateDocumentationFiles(docsRoot).ToList();
+        var files = EnumerateDocumentationFiles(docsRoot, excludePaths).ToList();
 
         var documents = new List<SourceDocumentInput>(files.Count);
         foreach (var file in files)
@@ -469,7 +491,10 @@ public sealed class DocumentPackageBuilder(
         return sourceRoot;
     }
 
-    private static IEnumerable<string> EnumerateDocumentationFiles(string root)
+    private static IEnumerable<string> EnumerateDocumentationFiles(
+        string root,
+        IReadOnlyList<string>? excludePaths = null
+    )
     {
         return Directory
             .EnumerateFiles(root, "*", SearchOption.AllDirectories)
@@ -479,7 +504,7 @@ public sealed class DocumentPackageBuilder(
                     StringComparer.OrdinalIgnoreCase
                 )
             )
-            .Where(path => !IsExcludedPath(root, path));
+            .Where(path => !IsExcludedPath(root, path, excludePaths));
     }
 
     private static string BuildDocumentationSearchUrl(DocumentationSource source)
@@ -488,13 +513,24 @@ public sealed class DocumentPackageBuilder(
         return $"https://www.perplexity.ai/search/new?q={Uri.EscapeDataString(query)}";
     }
 
-    private static bool IsExcludedPath(string root, string path)
+    private static bool IsExcludedPath(
+        string root,
+        string path,
+        IReadOnlyList<string>? excludePaths = null
+    )
     {
         var normalized = Path.GetRelativePath(root, path).Replace('\\', '/');
         return IsInDirectory(normalized, ".git")
             || IsInDirectory(normalized, "node_modules")
             || IsInDirectory(normalized, "bin")
-            || IsInDirectory(normalized, "obj");
+            || IsInDirectory(normalized, "obj")
+            || (excludePaths?.Any(pattern => GlobMatches(pattern, normalized)) ?? false);
+    }
+
+    private static bool GlobMatches(string pattern, string value)
+    {
+        var regex = "^" + Regex.Escape(pattern).Replace("\\*\\*", ".*").Replace("\\*", "[^/]*") + "$";
+        return Regex.IsMatch(value, regex, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static bool IsInDirectory(string relativePath, string directoryName) =>
@@ -677,8 +713,8 @@ public sealed class DocumentPackageBuilder(
                 Arguments =
                     string.IsNullOrWhiteSpace(source.Tag)
                     && string.IsNullOrWhiteSpace(source.Branch)
-                        ? $"clone --progress --depth 1 \"{source.Location}\" \"{tempRoot}\""
-                        : $"clone --progress --depth 1 --branch \"{source.Tag ?? source.Branch}\" \"{source.Location}\" \"{tempRoot}\"",
+                        ? $"clone --progress --depth 1 --no-checkout \"{source.Location}\" \"{tempRoot}\""
+                        : $"clone --progress --depth 1 --no-checkout --branch \"{source.Tag ?? source.Branch}\" \"{source.Location}\" \"{tempRoot}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
@@ -715,6 +751,25 @@ public sealed class DocumentPackageBuilder(
             {
                 throw new InvalidOperationException(
                     $"Git clone failed for '{source.Location}' with exit code {process.ExitCode}."
+                );
+            }
+
+            var checkout = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments =
+                    $"-C \"{tempRoot}\" checkout HEAD -- \"{source.DocsPath ?? "."}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var checkoutProcess =
+                Process.Start(checkout)
+                ?? throw new InvalidOperationException("Failed to start git checkout process.");
+            await checkoutProcess.WaitForExitAsync(cancellationToken);
+            if (checkoutProcess.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Git checkout failed for '{source.Location}' with exit code {checkoutProcess.ExitCode}."
                 );
             }
 

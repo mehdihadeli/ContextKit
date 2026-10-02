@@ -7,6 +7,8 @@ public enum SourceKind
     GitRepository = 2,
     LlmsText = 3,
     RawPage = 4,
+    ZipArchive = 5,
+    HtmlIndex = 6,
 }
 
 public sealed record DocumentationSource(
@@ -20,7 +22,8 @@ public sealed record DocumentationSource(
     string? Branch = null,
     string? Fingerprint = null,
     DateTimeOffset? LastBuiltAt = null,
-    DateTimeOffset? LastCheckedAt = null
+    DateTimeOffset? LastCheckedAt = null,
+    IReadOnlyList<string>? ExcludePaths = null
 );
 
 public sealed record PackageManifest(

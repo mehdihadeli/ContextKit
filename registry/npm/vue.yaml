@@ -1,0 +1,7 @@
+name: vue
+description: "Progressive JavaScript framework"
+repository: https://github.com/vuejs/docs
+source:
+  type: git
+  url: https://github.com/vuejs/docs
+  docs_path: src

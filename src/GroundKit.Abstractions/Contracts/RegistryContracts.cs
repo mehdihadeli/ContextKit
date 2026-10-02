@@ -14,3 +14,19 @@ public sealed record RegistryPackageMetadata(
     string Version,
     string? SourceCommit
 );
+
+public sealed record RegistryCatalog(
+    int SchemaVersion,
+    IReadOnlyList<RegistryCatalogEntry> Packages
+);
+
+public sealed record RegistryCatalogEntry(
+    string Registry,
+    string Name,
+    string Version,
+    string? Description,
+    string DownloadUrl,
+    long Size,
+    string Sha256,
+    string? SourceCommit = null
+);

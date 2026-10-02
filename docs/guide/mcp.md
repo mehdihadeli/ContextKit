@@ -7,20 +7,18 @@ GroundKit supports both standard MCP transports:
 
 Start the local server:
 
-During development, add the repository root to `PATH` once per shell session so
-`groundkit-mcp` resolves to the repo-local launcher:
+During development, use the root launcher so no additional `PATH` setup is needed:
 
 ```bash
-export PATH="$PWD:$PATH"
-groundkit-mcp
+groundkit mcp
 ```
 
 Start the Streamable HTTP server locally:
 
 ```bash
-groundkit-mcp --http
-groundkit-mcp --http 4000
-groundkit-mcp --http 4000 --host 0.0.0.0
+groundkit mcp --http
+groundkit mcp --http 4000
+groundkit mcp --http 4000 --host 0.0.0.0
 ```
 
 The default HTTP endpoint is `http://127.0.0.1:4000/mcp`.
@@ -47,12 +45,11 @@ container communicates over stdin/stdout and does not publish a network port.
 Both Docker services use the same `mcp-data` package volume.
 
 ```powershell
-$env:Path = "$PWD;$env:Path"
-groundkit-mcp
+groundkit mcp
 ```
 
 ```bash
-groundkit-mcp
+groundkit mcp
 ```
 
 For an installed or published executable, configure an MCP client with:

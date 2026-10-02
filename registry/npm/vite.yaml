@@ -1,0 +1,7 @@
+name: vite
+description: "Frontend build tool"
+repository: https://github.com/vitejs/vite
+source:
+  type: git
+  url: https://github.com/vitejs/vite
+  docs_path: docs

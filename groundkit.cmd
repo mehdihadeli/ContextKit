@@ -3,7 +3,7 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
-set "PROJECT=%SCRIPT_DIR%src\groundkit-cli\GroundKit.Cli.csproj"
+set "PROJECT=%SCRIPT_DIR%src\GroundKit.Cli\GroundKit.Cli.csproj"
 
 dotnet run --project "%PROJECT%" --no-restore -v:q -- %*
 exit /b %ERRORLEVEL%

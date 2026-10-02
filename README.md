@@ -87,7 +87,7 @@ In other words, ingestion happens ahead of time and retrieval happens on demand.
 
 ### Runtime flow
 
-When you run `groundkit-mcp`, the MCP host starts a stdio MCP server by default. Pass `--http [port]` to expose the same tools through Streamable HTTP at `/mcp`. The MCP registration comes from the `GroundKit.Mcp` assembly, where tool methods are discovered and exposed through the Model Context Protocol server SDK.
+When you run `groundkit mcp`, the MCP host starts a stdio MCP server by default. Pass `--http [port]` to expose the same tools through Streamable HTTP at `/mcp`. The MCP registration comes from the `GroundKit.Mcp` assembly, where tool methods are discovered and exposed through the Model Context Protocol server SDK.
 
 At runtime the agent talks to GroundKit over stdio, not HTTP. The server does not fetch the internet during the normal query path. It assumes packages have already been built and installed locally under the package store directory.
 
@@ -147,7 +147,7 @@ That means the MCP layer can serve both structured clients and text-oriented age
 You can think of GroundKit as two phases:
 
 1. Offline or pre-query phase: `add` builds a package from git, local docs, `llms.txt`, or a raw page and stores it as a local SQLite `.db` file.
-2. Online query phase: `groundkit-mcp` exposes MCP tools that resolve packages and query those local SQLite packages with no hosted dependency.
+2. Online query phase: `groundkit mcp` exposes MCP tools that resolve packages and query those local SQLite packages with no hosted dependency.
 
 That is the core architectural idea behind GroundKit: build once, query locally many times.
 
@@ -159,7 +159,7 @@ Run GroundKit with `groundkit <command>`.
 
 GroundKit commands also support short names through Spectre.Console.Cli.
 
-Run `groundkit --help`, `groundkit-registry --help`, or `groundkit-mcp --help`
+Run `groundkit --help`, `groundkit registry --help`, or `groundkit mcp --help`
 to see the same aliases and example invocations in built-in help.
 
 | Command            | Short alias(es) |
@@ -210,9 +210,9 @@ Shells pick the matching launcher automatically:
 - `cmd.exe` uses `groundkit.cmd`
 - PowerShell can use `groundkit.cmd` from `PATH` or `./groundkit.ps1` directly
 
-The same pattern also exists for the maintainer CLI as `groundkit-registry`.
-Use that command during development to run `src/GroundKit.Registry` from the
-current checkout.
+The maintainer CLI is available as the native `groundkit registry` subcommand.
+`GroundKit.Registry` supplies the command library; `GroundKit.Cli` hosts its
+commands in the same process during development and in the installed tool.
 
 ```bash
 export PATH="$PWD:$PATH"
@@ -523,14 +523,15 @@ groundkit export react ./artifacts
 
 ### Start MCP servers
 
-- `groundkit-mcp` starts the MCP server over stdio. It reads only packages already in the local store.
-- `groundkit-mcp --libs package-a,package-b` or `groundkit-mcp -l package-a,package-b` restricts the session to selected installed package names.
-- `groundkit-mcp --http [port] --host <host>` starts the Streamable HTTP MCP host and exposes MCP at `/mcp`.
-- `groundkit-mcp http --urls http://localhost:4000` or `groundkit-mcp h -u http://localhost:4000` provides the explicit URL form.
+- `groundkit mcp` starts the MCP server over stdio. It reads only packages already in the local store.
+- `groundkit mcp --libs package-a,package-b` or `groundkit mcp -l package-a,package-b` restricts the session to selected installed package names.
+- `groundkit mcp --http [port] --host <host>` starts the Streamable HTTP MCP host and exposes MCP at `/mcp`.
+- `groundkit mcp http --urls http://localhost:4000` or `groundkit mcp h -u http://localhost:4000` provides the explicit URL form.
 - `docker compose up --build mcp` starts the HTTP server at `http://localhost:8081/mcp`.
 - `docker compose run --rm -i mcp-stdio` runs the Docker MCP server over stdio for clients that launch containers as subprocesses.
 
-During development, `groundkit-mcp` is also available as a repo-local wrapper after adding the repository root to `PATH`, just like `groundkit` and `groundkit-registry`.
+During development, run the native `groundkit mcp` subcommand; no separate
+script `PATH` entry is required.
 
 Short aliases for the MCP executable:
 
@@ -543,9 +544,9 @@ Short aliases for the MCP executable:
 Examples:
 
 ```bash
-groundkit-mcp
-groundkit-mcp -l react,vite
-groundkit-mcp --http 4000 --host 0.0.0.0
+groundkit mcp
+groundkit mcp -l react,vite
+groundkit mcp --http 4000 --host 0.0.0.0
 ```
 
 ### `groundkit catalog [query]`
@@ -570,8 +571,11 @@ and `query-docs` remain available for existing clients.
 
 ## Registry packages, bundles, and OCI distribution
 
-GroundKit can use any compatible GroundKit registry. Default registry address is
-`http://localhost:8080`. Registry access is explicit and user-controlled:
+GroundKit can use any compatible GroundKit registry. Consumer commands default to
+the public catalog at
+`https://mehdihadeli.github.io/groundkit/registry/index.json`. Set
+`RegistryUrl` or `GROUNDKIT_REGISTRY_URL` for a different catalog or API.
+Registry access is explicit and user-controlled:
 GroundKit never downloads packages in the background, during `serve`, or merely
 because a package name appears in configuration. A package is downloaded only
 after the user runs `download-package` or `install`.
@@ -638,6 +642,46 @@ Environment variables take precedence over `.groundkit/config.json`. Copy
 example. `HttpHeaders` can provide registry authentication or other request
 headers; do not commit credentials to project configuration.
 
+### Registry distribution flow
+
+`GroundKit.Registry` builds packages through the `groundkit registry` branch.
+`GroundKit.Registry.Server` is an optional, separately deployed API. The
+[Registry Update workflow](.github/workflows/registry-update.yml) currently
+creates package files and uploads Actions artifacts; it does not start or
+publish to a registry server.
+
+```mermaid
+flowchart TD
+  definitions["registry/&lt;manager&gt;/*.yaml"] --> workflow["Registry Update workflow"]
+  workflow --> tooling["groundkit registry<br/>GroundKit.Registry library"]
+  tooling -->|validate and build-all| packages["dist-packages/*.db"]
+  packages --> artifacts["Actions artifacts<br/>14-day retention"]
+  artifacts -->|Download artifact, then import| cli["GroundKit.Cli<br/>groundkit"]
+  tooling -.->|Optional publish or publish-all| server["GroundKit.Registry.Server<br/>Self-hosted API"]
+  server -.->|Search metadata and download| cli
+  cli -->|Install or import| local[("Local SQLite packages")]
+  local --> queries["CLI queries and MCP<br/>No registry connection needed"]
+```
+
+Solid arrows show the current artifact workflow. Dashed arrows show supported
+API publishing, which is not enabled in the current workflow. The API stores
+metadata in SQLite and package files in S3-compatible storage; it does not build
+documentation. Consumers install packages explicitly and then query them locally.
+
+| Distribution target | Commands used by maintainers or CI | Availability |
+| --- | --- | --- |
+| Actions artifacts | `registry validate`, `registry build-all` | Current workflow; temporary file downloads, not a searchable API. |
+| Offline bundles | `registry build-all`, `registry bundle`, `registry import-bundle` | Available locally; not included in the current workflow. |
+| Self-hosted API | `registry validate`, `registry publish` or `registry publish-all` | Supported commands and server; CI publishing is optional and not configured. |
+| Releases + Pages | `registry validate`, `registry build-all`, `registry catalog-index`, then GitHub upload and deployment steps | Implemented; requires successful CI and Pages configuration. |
+
+For API publishing, CI can replace `build-all` with `publish-all`, which builds
+and uploads missing versions. Configure a runner-reachable `REGISTRY_SERVER_URL`
+and a secret `REGISTRY_PUBLISH_KEY`. Do not publish from untrusted contributor PRs.
+For Releases + Pages, retain `build-all`; API `publish-all` is not a GitHub
+Release uploader. See the [maintainer flow guide](src/GroundKit.Registry/README.md#distribution-flow)
+for the commands and an optional API publishing step.
+
 ### Registry API option
 
 The HTTP registry is the native distribution option for GroundKit clients. A
@@ -654,8 +698,15 @@ Run the included local registry with Docker Compose:
 ```bash
 cp .env.example .env
 # Set REGISTRY_PUBLISH_KEY in .env
-docker compose up --build
+docker compose up --build registry-api
 ```
+
+The API host is the separate `GroundKit.Registry.Server` project. Maintainer
+commands in `GroundKit.Registry` build and publish packages but do not host the
+API. For direct hosting, use
+`dotnet run --project src/GroundKit.Registry.Server -- --urls http://localhost:8080`;
+start the host directly, not through a registry maintainer command. See the
+[server README](src/GroundKit.Registry.Server/README.md) for configuration.
 
 The registry API listens on `http://localhost:8080`. Point GroundKit at another
 server with `.groundkit/config.json`:
@@ -669,7 +720,9 @@ server with `.groundkit/config.json`:
 }
 ```
 
-`GROUNDKIT_REGISTRY_URL` overrides `RegistryUrl` for a shell/session. Use
+Without configuration, consumer commands use the public Pages catalog at
+`https://mehdihadeli.github.io/groundkit/registry/index.json`. Set
+`GROUNDKIT_REGISTRY_URL` or `RegistryUrl` to use another catalog or API. Use
 `HttpHeaders` for private registry request headers, but keep secrets out of
 committed files. MinIO backs the included registry storage at
 `http://localhost:9001`; clients use the API address, not the MinIO address.
@@ -680,51 +733,91 @@ The registry maintainer CLI builds packages and creates a bundle containing all
 `.db` files, `index.json`, and `SHA256SUMS`:
 
 ```bash
-groundkit-registry validate --dir registry
-groundkit-registry build-all --dir registry --output ./dist-packages
-groundkit-registry bundle --output ./dist-packages --format zip
-groundkit-registry bundle --output ./dist-packages --format tar.gz
+groundkit registry validate --dir registry
+groundkit registry build-all --dir registry --output ./dist-packages
+groundkit registry bundle --output ./dist-packages --format zip
+groundkit registry bundle --output ./dist-packages --format tar.gz
 ```
 
 Import a bundle on an offline machine, then query or serve the imported packages:
 
 ```bash
-groundkit-registry import-bundle \
+groundkit registry import-bundle \
    ./dist-packages/groundkit-registry.zip --output ./imported-packages
-groundkit import ./imported-packages/react@19.1.0.db
+groundkit import ./imported-packages/react@latest.db
 groundkit list
 ```
 
-The bundle is a distribution artifact, not a live registry. It does not enable
-`search-packages` until its individual `.db` files have been imported into the
-local GroundKit store or published to an HTTP registry.
+The bundle is a distribution artifact, not a live registry. Importing its `.db`
+files enables local queries, not `search-packages`. Registry search requires
+a compatible API or a configured static catalog.
 
 ### GitHub Actions artifact option
 
-The included `Registry Update` workflow runs on schedule, manual dispatch, and
-published releases. It validates definitions, builds individual `.db` files,
-creates ZIP and tar.gz bundles, and uploads them as a GitHub Actions artifact
-named `groundkit-registry-<run-id>`.
+The included `Registry Update` workflow runs on schedule and manual dispatch.
+It validates definitions, builds individual `.db` files, and uploads them as a
+GitHub Actions artifact named `groundkit-registry-<run-id>`. Bundles can be built
+locally with the commands above; the workflow does not create them yet.
 
 Download that artifact from GitHub Actions or with GitHub CLI:
 
 ```bash
 gh run list --workflow registry-update.yml
 gh run download <run-id> --name groundkit-registry-<run-id> --dir ./registry-download
-groundkit import ./registry-download/react@19.1.0.db
+groundkit import ./registry-download/react@latest.db
 ```
 
 GitHub Actions artifacts are suitable for CI handoff and short-lived builds.
 The workflow currently retains them for 14 days, so use a release asset, bundle
 archive, or HTTP registry for durable distribution.
 
+### GitHub Releases + Pages
+
+The [Registry Update workflow](.github/workflows/registry-update.yml) builds
+packages and generates a catalog, then publishes a snapshot Release on `main`.
+The [docs workflow](.github/workflows/deploy-docs.yml) deploys that catalog
+alongside the existing Pages site after a successful registry run. Source support
+is implemented; a public endpoint exists only after both workflows succeed.
+
+```mermaid
+flowchart LR
+  build["CI builds .db packages"] --> catalog["catalog-index generates metadata and hashed assets"]
+  catalog --> assets["Publish snapshot Release"]
+  assets --> pages["Docs workflow deploys registry/index.json"]
+  pages --> client["CLI reads catalog and verifies Release downloads"]
+```
+
+| Component | Implementation |
+| --- | --- |
+| Catalog generation | `groundkit registry catalog-index` reads SQLite identity/version, matches definitions, and creates URLs, sizes, and SHA-256 entries. |
+| Release assets | Registry Update publishes `registry-<run-id>-<attempt>` snapshots, without overwriting earlier assets or marking snapshots as the latest CLI release. |
+| Pages catalog | Docs deployment preserves the newest published catalog at `registry/index.json`. |
+| Consumer verification | Existing `search-packages`, `download-package`, and `install` commands use static mode for a full `index.json` URL and verify downloads before import. |
+
+Enable Pages with the GitHub Actions source and allow workflow Release writes.
+Enable release immutability for platform-enforced protection. Workflows must be
+on the default branch and all build/test gates must pass. The Pages deployment
+summary reports the actual catalog URL. Configure it explicitly:
+
+```powershell
+$env:GROUNDKIT_REGISTRY_URL = "https://OWNER.github.io/REPOSITORY/registry/index.json"
+groundkit search-packages npm react
+groundkit install npm/react
+```
+
+Replace the example URL with your deployment. No self-hosted server or new
+consumer commands are needed. A site root is not a catalog URL: include the full
+`registry/index.json` path. API base URLs continue to use the self-hosted protocol.
+Direct Release `.db` URLs also work, but bypass catalog checksum verification.
+See the [registry tooling README](src/GroundKit.Registry/README.md#public-distribution-status)
+for catalog generation and publication details.
+
 ### OCI option through GHCR
 
-On manual workflow runs and published releases, the workflow also pushes each
-`.db` package to GitHub Container Registry as an OCI artifact using ORAS. OCI
-packages are useful when teams already authenticate to GHCR and want immutable
-content-addressed artifacts; GroundKit's registry client does not pull GHCR
-artifacts directly.
+OCI packages are an optional external distribution channel when teams already
+authenticate to GHCR. The current workflow does not push OCI artifacts, and
+GroundKit's registry client does not pull them directly. If maintainers publish
+packages with ORAS, users can pull the artifact and import its `.db` file:
 
 ```bash
 oras login ghcr.io -u USERNAME --password-stdin
@@ -732,36 +825,37 @@ oras pull ghcr.io/OWNER/groundkit-packages:react--19.1.0-<commit12>
 groundkit import ./react--19.1.0-<commit12>.db
 ```
 
-The workflow uses an immutable tag containing the package name/version and the
-first 12 characters of the commit SHA. Check the workflow logs or GHCR package
-metadata for the exact tag. OCI artifact media types are:
+The commands above illustrate a possible tag and filename convention, not an
+existing published artifact. Use the actual reference supplied by the maintainer.
+Suggested OCI artifact media types are:
 
 ```text
 application/vnd.groundkit.package.v1+sqlite
 application/vnd.groundkit.package.v1
 ```
 
-Use the HTTP registry API when GroundKit users need `search-packages` and
-`install`; use bundles, GitHub artifacts, or OCI when distributing artifacts
-outside a registry API.
+Use the HTTP registry API or a static catalog for named-package search and
+installation. Bundles, GitHub artifacts, and OCI provide external file-transfer
+options.
 
 ### Registry maintainer commands
 
-`src/GroundKit.Registry` is separate from the user-facing `src/GroundKit.Cli` CLI:
+`GroundKit.Registry` is a command library used by `GroundKit.Cli`, not a separate
+executable or tool installation. Maintainer commands live under `groundkit registry`:
 
 Short aliases for the maintainer CLI:
 
-| Command         | Short alias(es) |
-| --------------- | --------------- |
-| `list`          | `l`, `ls`       |
-| `validate`      | `v`, `val`      |
-| `build`         | `b`             |
-| `build-all`     | `ba`            |
-| `publish`       | `p`, `pub`      |
-| `publish-all`   | `pa`            |
-| `bundle`        | `bd`, `bun`     |
-| `import-bundle` | `ib`            |
-| `serve`         | `s`             |
+| Command | Short alias(es) | Used for |
+| --- | --- | --- |
+| `list` | `l`, `ls` | Contributor and maintainer definition discovery. |
+| `validate` | `v`, `val` | Local checks and the current CI workflow. |
+| `build` | `b` | Building one definition locally. |
+| `build-all` | `ba` | Bulk builds and the current CI workflow. |
+| `publish` | `p`, `pub` | Uploading one package to an optional self-hosted API. |
+| `publish-all` | `pa` | Bulk API publishing by maintainers or configured CI. |
+| `bundle` | `bd`, `bun` | Offline or bulk artifact distribution. |
+| `import-bundle` | `ib` | Extracting bundles before importing individual packages. |
+| `catalog-index` | None | Generating catalog metadata and content-addressed Release asset copies. |
 
 | Option          | Short alias |
 | --------------- | ----------- |
@@ -769,21 +863,20 @@ Short aliases for the maintainer CLI:
 | `--output`      | `-o`        |
 | `--format`      | `-f`        |
 | `--destination` | `-t`        |
-| `--urls`        | `-u`        |
+| `--base-url`    | None        |
 
 ```bash
-groundkit-registry list --dir registry
-groundkit-registry validate --dir registry
-groundkit-registry build react --dir registry --output ./dist-packages
-groundkit-registry build react 19.1.0 --dir registry --output ./dist-packages
-groundkit-registry publish react --dir registry --output ./dist-packages
-groundkit-registry publish-all --dir registry --output ./dist-packages
+groundkit registry list --dir registry
+groundkit registry validate --dir registry
+groundkit registry build react --dir registry --output ./dist-packages
+groundkit registry publish react --dir registry --output ./dist-packages
+groundkit registry publish-all --dir registry --output ./dist-packages
 ```
 
 Short-form example:
 
 ```bash
-groundkit-registry b react -d registry -o ./dist-packages
+groundkit registry b react -d registry -o ./dist-packages
 ```
 
 Set `REGISTRY_SERVER_URL` and `REGISTRY_PUBLISH_KEY` when publishing to an

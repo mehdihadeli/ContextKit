@@ -1,0 +1,7 @@
+name: nestjs
+description: "Node.js server framework"
+repository: https://github.com/nestjs/docs.nestjs.com
+source:
+  type: git
+  url: https://github.com/nestjs/docs.nestjs.com
+  docs_path: content

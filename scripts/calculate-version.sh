@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$script_dir/.."
+
 nbgv="${NBGV:-nbgv}"
 output_file="${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set by GitHub Actions}"
 

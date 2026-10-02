@@ -17,6 +17,8 @@ jobs:
     name: Build registry packages
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -34,14 +36,23 @@ jobs:
         run: dotnet build GroundKit.slnx --no-restore --configuration Release
 
       - name: Run tests
-        run: dotnet test GroundKit.slnx --no-build --configuration Release
+        run: dotnet test --solution GroundKit.slnx --no-build --configuration Release
 
       - name: Validate and build registry definitions
         run: |
-          dotnet run --project src/groundkit-registry --no-build --configuration Release -- \
-            validate --dir registry/packages
-          dotnet run --project src/groundkit-registry --no-build --configuration Release -- \
-            build-all --dir registry/packages --output ./dist-packages
+          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+            registry validate --dir registry
+          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+            registry build-all --dir registry --output ./dist-packages
+
+      - name: Generate static registry catalog and Release assets
+        env:
+          REGISTRY_TAG: registry-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+            registry catalog-index --dir registry --output ./dist-packages \
+            --destination ./dist-catalog \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$REGISTRY_TAG/"
 
       - name: Upload registry packages
         uses: actions/upload-artifact@v7
@@ -50,3 +61,17 @@ jobs:
           path: ./dist-packages/*.db
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish registry snapshot Release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_TAG: registry-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          gh release create "$REGISTRY_TAG" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --draft --latest=false \
+            --title "Registry snapshot $REGISTRY_TAG" \
+            --notes "Documentation packages and catalog built from $GITHUB_SHA."
+          gh release upload "$REGISTRY_TAG" --repo "$GITHUB_REPOSITORY" \
+            ./dist-catalog/assets/*.db ./dist-catalog/index.json
+          gh release edit "$REGISTRY_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false

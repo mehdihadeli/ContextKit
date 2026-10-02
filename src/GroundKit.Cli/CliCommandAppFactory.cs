@@ -1,3 +1,5 @@
+using GroundKit.Mcp;
+using GroundKit.Registry;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Cli;
 
@@ -11,6 +13,9 @@ internal static class CliCommandAppFactory
         app.Configure(config =>
         {
             config.SetApplicationName("groundkit");
+
+            // A command represents one operation. Its CommandSettings define the positional arguments
+            // and options it accepts, such as add <SOURCE> --path <PATH>.
             config
                 .AddCommand<AddCliCommand>("add")
                 .WithAlias("a")
@@ -84,6 +89,18 @@ internal static class CliCommandAppFactory
                 .WithAlias("cat")
                 .WithDescription("Browse curated starter sources.")
                 .WithExample("c", "react");
+
+            // Standalone actions such as add and list accept their own arguments and options.
+            // Branches group related commands, so mcp and registry can accept a subcommand plus its arguments.
+            config.AddBranch<CommandSettings>("mcp", mcp =>
+            {
+                mcp.AddCommand<HttpMcpCommand>("http")
+                    .WithAlias("h")
+                    .WithDescription("Start the HTTP MCP host and expose `/mcp`.");
+                mcp.SetDefaultCommand<StdioMcpCommand>();
+            });
+
+            RegistryCommandRegistration.Configure(config);
         });
         return app;
     }

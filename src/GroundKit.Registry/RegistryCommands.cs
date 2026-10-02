@@ -216,22 +216,29 @@ public sealed class ImportBundleRegistryCommand(RegistryApplication application)
     }
 }
 
-public sealed class ServeRegistryCommand : Command<ServeRegistryCommand.Settings>
+public sealed class CatalogIndexRegistryCommand(RegistryApplication application)
+    : Command<CatalogIndexRegistryCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : RegistryPathSettings
     {
-        [CommandOption("-u|--urls")]
-        public string? Urls { get; init; }
+        [CommandOption("-o|--output")]
+        public string? Output { get; init; }
+
+        [CommandOption("-t|--destination")]
+        public string? Destination { get; init; }
+
+        [CommandOption("--base-url <URL>")]
+        public string BaseUrl { get; init; } = string.Empty;
     }
 
-    protected override int Execute(
-        CommandContext context,
-        Settings settings,
-        CancellationToken cancellationToken
-    )
+    protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
-        var arguments = new List<string>();
-        RegistryCommandArguments.AddOption(arguments, "--urls", settings.Urls);
-        return RegistryServer.RunAsync([.. arguments]).GetAwaiter().GetResult();
+        var arguments = new List<string> { "catalog-index" };
+        RegistryCommandArguments.AddOption(arguments, "--dir", settings.DirectoryPath);
+        RegistryCommandArguments.AddOption(arguments, "--output", settings.Output);
+        RegistryCommandArguments.AddOption(arguments, "--destination", settings.Destination);
+        RegistryCommandArguments.AddOption(arguments, "--base-url", settings.BaseUrl);
+        return RegistryCommandArguments.Run(application, arguments);
     }
 }
+

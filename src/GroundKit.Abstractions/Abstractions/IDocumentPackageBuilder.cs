@@ -26,4 +26,14 @@ public interface IDocumentPackageBuilder
         string? gitRef,
         string? packageName
     ) => BuildAsync(input, docsPath, cancellationToken, version, gitRef);
+
+    Task<BuildResult> BuildAsync(
+        string input,
+        string? docsPath,
+        CancellationToken cancellationToken,
+        string? version,
+        string? gitRef,
+        string? packageName,
+        IReadOnlyList<string>? excludePaths
+    ) => BuildAsync(input, docsPath, cancellationToken, version, gitRef, packageName);
 }

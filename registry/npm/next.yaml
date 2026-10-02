@@ -1,0 +1,7 @@
+name: next
+description: "React framework for the web"
+repository: https://github.com/vercel/next.js
+source:
+  type: git
+  url: https://github.com/vercel/next.js
+  docs_path: docs

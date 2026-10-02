@@ -1,0 +1,7 @@
+name: vitest
+description: "Vite-native testing framework"
+repository: https://github.com/vitest-dev/vitest
+source:
+  type: git
+  url: https://github.com/vitest-dev/vitest
+  docs_path: docs

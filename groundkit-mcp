@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-# Repo-local development launcher for the GroundKit MCP server.
-set -euo pipefail
-
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-project="$script_dir/src/groundkit-mcp/GroundKit.Mcp.csproj"
-
-dotnet run --project "$project" --no-restore -v:q -- "$@"

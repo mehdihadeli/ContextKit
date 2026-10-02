@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-# Repo-local development launcher for the GroundKit registry maintainer CLI.
-set -euo pipefail
-
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-project="$script_dir/src/groundkit-registry/GroundKit.Registry.csproj"
-
-dotnet run --project "$project" --no-restore -v:q -p:NoWarn=NU1510%3BNU1901 -- "$@"

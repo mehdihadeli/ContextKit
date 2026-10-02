@@ -1,0 +1,7 @@
+name: graphql
+description: "Query language and runtime"
+repository: https://github.com/graphql/graphql.github.io
+source:
+  type: git
+  url: https://github.com/graphql/graphql.github.io
+  docs_path: src

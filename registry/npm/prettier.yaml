@@ -1,0 +1,7 @@
+name: prettier
+description: "Opinionated code formatter"
+repository: https://github.com/prettier/prettier.com
+source:
+  type: git
+  url: https://github.com/prettier/prettier.com
+  docs_path: src/content
