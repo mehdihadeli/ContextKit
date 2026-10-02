@@ -48,11 +48,56 @@ The server may be local, internal, or hosted. Configure its base URL with `GROUN
 
 ## Local server
 
-Start the Compose deployment from the repository root:
+The registry server is an optional self-hosted Docker deployment. It stores
+metadata in SQLite and package files in MinIO or another S3-compatible store.
+It is not required for local CLI or MCP queries.
+
+From a cloned repository, create the environment file and replace both example
+secrets before starting the services:
 
 ```bash
 cp .env.example .env
-docker compose up --build
 ```
 
-The API listens on `http://localhost:8080` and MinIO listens on `http://localhost:9001`. Set `REGISTRY_PUBLISH_KEY` in `.env` for authenticated package uploads.
+Start the registry API and its MinIO dependencies:
+
+```bash
+docker compose up --build -d registry-api
+```
+
+Check the API:
+
+```bash
+curl http://localhost:8080/health
+```
+
+The API listens on `http://localhost:8080`. MinIO stores package files on port
+`9000` and its administration console is available on port `9001`.
+
+Publish packages from the CLI by configuring the API address and upload token:
+
+```powershell
+$env:REGISTRY_SERVER_URL = "http://localhost:8080"
+$env:REGISTRY_PUBLISH_KEY = "the-value-from-.env"
+groundkit registry publish-all --dir registry --output ./dist-packages
+```
+
+Configure consumers with the same API address:
+
+```powershell
+$env:GROUNDKIT_REGISTRY_URL = "http://localhost:8080"
+groundkit search-packages npm react
+groundkit install npm/react
+```
+
+For a one-off consumer request, use `--registry-url` instead of setting the
+environment variable:
+
+```powershell
+groundkit search-packages npm react --registry-url http://localhost:8080
+```
+
+The Compose volumes `registry-data` and `minio-data` contain the registry
+state and package files. Back up both volumes. For production, expose only the
+registry API through HTTPS, keep MinIO private, replace development credentials,
+and do not commit `.env` or publish tokens.

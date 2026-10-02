@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>groundkit-mcp</ToolCommandName>
     <PackageId>GroundKit.Mcp</PackageId>
