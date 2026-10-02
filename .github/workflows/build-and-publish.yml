@@ -107,6 +107,7 @@ jobs:
         run: dotnet pack src/GroundKit.Cli/GroundKit.Cli.csproj --configuration Release --no-restore --output artifacts -p:PublicRelease=true -p:PackageVersion=${{ needs['calculate-version'].outputs.version }}
 
       - name: Publish to NuGet.org
+        continue-on-error: true
         run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Publish self-contained executables
