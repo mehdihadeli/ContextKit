@@ -29,7 +29,7 @@ public sealed class SqlitePackageStoreTests : IDisposable
         var store = CreateStore();
         var buildResult = CreateBuildResult("test-package");
 
-        var path = await store.SaveAsync(buildResult);
+        var path = await store.SaveAsync(buildResult, TestContext.Current.CancellationToken);
 
         File.Exists(path).ShouldBeTrue();
         path.ShouldContain(_rootPath);
@@ -39,9 +39,9 @@ public sealed class SqlitePackageStoreTests : IDisposable
     public async Task Should_List_Saved_Package()
     {
         var store = CreateStore();
-        await store.SaveAsync(CreateBuildResult("test-package"));
+        await store.SaveAsync(CreateBuildResult("test-package"), TestContext.Current.CancellationToken);
 
-        var packages = await store.ListAsync();
+        var packages = await store.ListAsync(TestContext.Current.CancellationToken);
 
         packages.ShouldHaveSingleItem();
         packages[0].PackageId.ShouldBe("test-package");
@@ -51,9 +51,9 @@ public sealed class SqlitePackageStoreTests : IDisposable
     public async Task Should_Return_Summary_For_Existing_Package()
     {
         var store = CreateStore();
-        await store.SaveAsync(CreateBuildResult("test-package"));
+        await store.SaveAsync(CreateBuildResult("test-package"), TestContext.Current.CancellationToken);
 
-        var package = await store.GetPackageAsync("test-package");
+        var package = await store.GetPackageAsync("test-package", TestContext.Current.CancellationToken);
 
         package.ShouldNotBeNull();
         package.PackageId.ShouldBe("test-package");
@@ -64,7 +64,7 @@ public sealed class SqlitePackageStoreTests : IDisposable
     {
         var store = CreateStore();
 
-        var package = await store.GetPackageAsync("missing");
+        var package = await store.GetPackageAsync("missing", TestContext.Current.CancellationToken);
 
         package.ShouldBeNull();
     }
@@ -73,25 +73,38 @@ public sealed class SqlitePackageStoreTests : IDisposable
     public async Task Should_Delete_Existing_Package_File()
     {
         var store = CreateStore();
-        await store.SaveAsync(CreateBuildResult("test-package"));
+        await store.SaveAsync(CreateBuildResult("test-package"), TestContext.Current.CancellationToken);
 
-        var removed = await store.RemoveAsync("test-package");
+        var removed = await store.RemoveAsync(
+            "test-package",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         removed.ShouldBe(1);
-        (await store.ListAsync()).ShouldBeEmpty();
+        (await store.ListAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Should_Delete_Only_Requested_Package_Version()
     {
         var store = CreateStore();
-        await store.SaveAsync(CreateBuildResult("test-package", version: "1.0.0"));
-        await store.SaveAsync(CreateBuildResult("test-package", version: "2.0.0"));
+        await store.SaveAsync(
+            CreateBuildResult("test-package", version: "1.0.0"),
+            TestContext.Current.CancellationToken
+        );
+        await store.SaveAsync(
+            CreateBuildResult("test-package", version: "2.0.0"),
+            TestContext.Current.CancellationToken
+        );
 
-        var removed = await store.RemoveAsync("test-package", "1.0.0");
+        var removed = await store.RemoveAsync(
+            "test-package",
+            "1.0.0",
+            TestContext.Current.CancellationToken
+        );
 
         removed.ShouldBe(1);
-        var remaining = await store.ListAsync();
+        var remaining = await store.ListAsync(TestContext.Current.CancellationToken);
         remaining.ShouldHaveSingleItem();
         remaining[0].Version.ShouldBe("2.0.0");
     }
@@ -100,10 +113,17 @@ public sealed class SqlitePackageStoreTests : IDisposable
     public async Task Should_Copy_Package_File_When_Exporting()
     {
         var store = CreateStore();
-        var path = await store.SaveAsync(CreateBuildResult("test-package"));
+        var path = await store.SaveAsync(
+            CreateBuildResult("test-package"),
+            TestContext.Current.CancellationToken
+        );
         var destination = Path.Combine(_rootPath, "exports");
 
-        var exportPath = await store.ExportAsync("test-package", destination);
+        var exportPath = await store.ExportAsync(
+            "test-package",
+            destination,
+            TestContext.Current.CancellationToken
+        );
 
         File.Exists(exportPath).ShouldBeTrue();
         Path.GetFileName(exportPath).ShouldBe(Path.GetFileName(path));
@@ -113,12 +133,18 @@ public sealed class SqlitePackageStoreTests : IDisposable
     public async Task Should_Copy_Imported_Package_Into_Store()
     {
         var store = CreateStore();
-        var path = await store.SaveAsync(CreateBuildResult("test-package"));
+        var path = await store.SaveAsync(
+            CreateBuildResult("test-package"),
+            TestContext.Current.CancellationToken
+        );
         var importSource = Path.Combine(_rootPath, "import", Path.GetFileName(path));
         Directory.CreateDirectory(Path.GetDirectoryName(importSource)!);
         File.Copy(path, importSource);
 
-        var importedPath = await store.ImportAsync(importSource);
+        var importedPath = await store.ImportAsync(
+            importSource,
+            TestContext.Current.CancellationToken
+        );
 
         File.Exists(importedPath).ShouldBeTrue();
         importedPath.ShouldContain(_rootPath);
@@ -129,10 +155,14 @@ public sealed class SqlitePackageStoreTests : IDisposable
     {
         var store = CreateStore();
         await store.SaveAsync(
-            CreateBuildResult("test-package", "# Getting Started\n\nUse refresh to rebuild.")
+            CreateBuildResult("test-package", "# Getting Started\n\nUse refresh to rebuild."),
+            TestContext.Current.CancellationToken
         );
 
-        var response = await store.QueryAsync(new DocsQueryRequest("test-package", "refresh"));
+        var response = await store.QueryAsync(
+            new DocsQueryRequest("test-package", "refresh"),
+            TestContext.Current.CancellationToken
+        );
 
         response.Hits.ShouldNotBeEmpty();
         response.TotalTokens.ShouldBeGreaterThan(0);
@@ -144,7 +174,10 @@ public sealed class SqlitePackageStoreTests : IDisposable
         var store = CreateStore();
 
         await Should.ThrowAsync<InvalidOperationException>(
-            () => store.QueryAsync(new DocsQueryRequest("missing", "topic"))
+            () => store.QueryAsync(
+                new DocsQueryRequest("missing", "topic"),
+                TestContext.Current.CancellationToken
+            )
         );
     }
 
@@ -152,9 +185,9 @@ public sealed class SqlitePackageStoreTests : IDisposable
     public async Task Should_Return_Source_For_Existing_Package()
     {
         var store = CreateStore();
-        await store.SaveAsync(CreateBuildResult("test-package"));
+        await store.SaveAsync(CreateBuildResult("test-package"), TestContext.Current.CancellationToken);
 
-        var source = await store.GetSourceAsync("test-package");
+        var source = await store.GetSourceAsync("test-package", TestContext.Current.CancellationToken);
 
         source.ShouldNotBeNull();
         source.Kind.ShouldBe(SourceKind.LocalDirectory);

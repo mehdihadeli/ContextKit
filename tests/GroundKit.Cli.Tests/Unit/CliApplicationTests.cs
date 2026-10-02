@@ -158,7 +158,11 @@ public sealed class CliApplicationTests
             Path.GetTempPath(),
             $"mattpocock-skills@1.2.3-{Guid.NewGuid():N}.db"
         );
-        await File.WriteAllBytesAsync(packagePath, [1, 2, 3]);
+        await File.WriteAllBytesAsync(
+            packagePath,
+            [1, 2, 3],
+            TestContext.Current.CancellationToken
+        );
         try
         {
             var source = new DocumentationSource(

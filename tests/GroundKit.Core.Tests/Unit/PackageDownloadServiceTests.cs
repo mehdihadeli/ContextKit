@@ -30,7 +30,11 @@ public sealed class PackageDownloadServiceTests : IDisposable
     public async Task Should_Import_Existing_Local_Package()
     {
         var packagePath = Path.Combine(_tempRoot, "react@19.1.0.db");
-        await File.WriteAllBytesAsync(packagePath, [1, 2, 3]);
+        await File.WriteAllBytesAsync(
+            packagePath,
+            [1, 2, 3],
+            TestContext.Current.CancellationToken
+        );
         var importedPath = string.Empty;
         var store = Substitute.For<IPackageStore>();
         store
@@ -38,7 +42,10 @@ public sealed class PackageDownloadServiceTests : IDisposable
             .Returns("imported.db");
         var service = CreateService(store);
 
-        var installedPath = await service.InstallAsync(packagePath);
+        var installedPath = await service.InstallAsync(
+            packagePath,
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         installedPath.ShouldBe("imported.db");
         importedPath.ShouldBe(packagePath);
@@ -58,7 +65,8 @@ public sealed class PackageDownloadServiceTests : IDisposable
         var service = CreateService(store, [9, 8, 7]);
 
         var installedPath = await service.InstallAsync(
-            "https://example.com/packages/react@19.1.0.db"
+            "https://example.com/packages/react@19.1.0.db",
+            cancellationToken: TestContext.Current.CancellationToken
         );
 
         installedPath.ShouldBe("imported.db");
@@ -78,7 +86,10 @@ public sealed class PackageDownloadServiceTests : IDisposable
             .Returns("imported.db");
         var service = CreateService(store, [6, 5, 4]);
 
-        var installedPath = await service.InstallAsync("https://localhost/mattpocock-skills@1.2.3");
+        var installedPath = await service.InstallAsync(
+            "https://localhost/mattpocock-skills@1.2.3",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         installedPath.ShouldBe("imported.db");
         importedBytes.ShouldBe([6, 5, 4]);

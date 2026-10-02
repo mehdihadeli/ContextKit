@@ -30,7 +30,8 @@ public sealed class PackageLifecycleTests : IDisposable
         Directory.CreateDirectory(docsPath);
         await File.WriteAllTextAsync(
             Path.Combine(docsPath, "intro.md"),
-            "# Introduction\n\nGroundKit is a local-first documentation MCP."
+            "# Introduction\n\nGroundKit is a local-first documentation MCP.",
+            TestContext.Current.CancellationToken
         );
 
         var builder = new DocumentPackageBuilder(
@@ -38,16 +39,20 @@ public sealed class PackageLifecycleTests : IDisposable
             new TestHttpClientFactory(),
             NullLogger<DocumentPackageBuilder>.Instance
         );
-        var buildResult = await builder.BuildAsync(docsPath);
+        var buildResult = await builder.BuildAsync(
+            docsPath,
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         var store = new SqlitePackageStore(
             new PackageStoreOptions(Path.Combine(_tempRoot, "packages")),
             NullLogger<SqlitePackageStore>.Instance
         );
-        var packagePath = await store.SaveAsync(buildResult);
+        var packagePath = await store.SaveAsync(buildResult, TestContext.Current.CancellationToken);
 
         var response = await store.QueryAsync(
-            new DocsQueryRequest(buildResult.Manifest.PackageId, "local-first")
+            new DocsQueryRequest(buildResult.Manifest.PackageId, "local-first"),
+            TestContext.Current.CancellationToken
         );
 
         File.Exists(packagePath).ShouldBeTrue();
@@ -64,7 +69,8 @@ public sealed class PackageLifecycleTests : IDisposable
         Directory.CreateDirectory(docsPath);
         await File.WriteAllTextAsync(
             Path.Combine(docsPath, "intro.md"),
-            "# Intro\n\nVersioned docs."
+            "# Intro\n\nVersioned docs.",
+            TestContext.Current.CancellationToken
         );
 
         var builder = new DocumentPackageBuilder(
@@ -72,7 +78,10 @@ public sealed class PackageLifecycleTests : IDisposable
             new TestHttpClientFactory(),
             NullLogger<DocumentPackageBuilder>.Instance
         );
-        var buildResult = await builder.BuildAsync(docsPath);
+        var buildResult = await builder.BuildAsync(
+            docsPath,
+            cancellationToken: TestContext.Current.CancellationToken
+        );
         var versionOne = buildResult with
         {
             Manifest = buildResult.Manifest with
@@ -94,14 +103,16 @@ public sealed class PackageLifecycleTests : IDisposable
             new PackageStoreOptions(Path.Combine(_tempRoot, "packages")),
             NullLogger<SqlitePackageStore>.Instance
         );
-        await store.SaveAsync(versionOne);
-        await store.SaveAsync(versionTwo);
+        await store.SaveAsync(versionOne, TestContext.Current.CancellationToken);
+        await store.SaveAsync(versionTwo, TestContext.Current.CancellationToken);
 
         var latest = await store.QueryAsync(
-            new DocsQueryRequest(buildResult.Manifest.PackageId, "Versioned")
+            new DocsQueryRequest(buildResult.Manifest.PackageId, "Versioned"),
+            TestContext.Current.CancellationToken
         );
         var exact = await store.QueryAsync(
-            new DocsQueryRequest($"{buildResult.Manifest.PackageId}@1.0.0", "Versioned")
+            new DocsQueryRequest($"{buildResult.Manifest.PackageId}@1.0.0", "Versioned"),
+            TestContext.Current.CancellationToken
         );
 
         latest.Version.ShouldBe("2.0.0");
@@ -113,36 +124,51 @@ public sealed class PackageLifecycleTests : IDisposable
     {
         var docsPath = Path.Combine(_tempRoot, "docs");
         Directory.CreateDirectory(docsPath);
-        await File.WriteAllTextAsync(Path.Combine(docsPath, "page.md"), "# Page\n\nContent.");
+        await File.WriteAllTextAsync(
+            Path.Combine(docsPath, "page.md"),
+            "# Page\n\nContent.",
+            TestContext.Current.CancellationToken
+        );
 
         var builder = new DocumentPackageBuilder(
             new SourceDetector(),
             new TestHttpClientFactory(),
             NullLogger<DocumentPackageBuilder>.Instance
         );
-        var buildResult = await builder.BuildAsync(docsPath);
+        var buildResult = await builder.BuildAsync(
+            docsPath,
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         var sourceStore = new SqlitePackageStore(
             new PackageStoreOptions(Path.Combine(_tempRoot, "source-packages")),
             NullLogger<SqlitePackageStore>.Instance
         );
-        await sourceStore.SaveAsync(buildResult);
+        await sourceStore.SaveAsync(buildResult, TestContext.Current.CancellationToken);
 
         var exportPath = Path.Combine(_tempRoot, "exports", "exported.db");
-        await sourceStore.ExportAsync(buildResult.Manifest.PackageId, exportPath);
+        await sourceStore.ExportAsync(
+            buildResult.Manifest.PackageId,
+            exportPath,
+            TestContext.Current.CancellationToken
+        );
 
         var destinationStore = new SqlitePackageStore(
             new PackageStoreOptions(Path.Combine(_tempRoot, "destination-packages")),
             NullLogger<SqlitePackageStore>.Instance
         );
-        var importedPath = await destinationStore.ImportAsync(exportPath);
+        var importedPath = await destinationStore.ImportAsync(
+            exportPath,
+            TestContext.Current.CancellationToken
+        );
 
-        var packages = await destinationStore.ListAsync();
+        var packages = await destinationStore.ListAsync(TestContext.Current.CancellationToken);
         packages.ShouldHaveSingleItem();
         File.Exists(importedPath).ShouldBeTrue();
 
         var response = await destinationStore.QueryAsync(
-            new DocsQueryRequest(buildResult.Manifest.PackageId, "Content")
+            new DocsQueryRequest(buildResult.Manifest.PackageId, "Content"),
+            TestContext.Current.CancellationToken
         );
         response.Hits.ShouldNotBeEmpty();
     }
@@ -152,22 +178,32 @@ public sealed class PackageLifecycleTests : IDisposable
     {
         var docsPath = Path.Combine(_tempRoot, "docs");
         Directory.CreateDirectory(docsPath);
-        await File.WriteAllTextAsync(Path.Combine(docsPath, "page.md"), "# Page\n\nContent.");
+        await File.WriteAllTextAsync(
+            Path.Combine(docsPath, "page.md"),
+            "# Page\n\nContent.",
+            TestContext.Current.CancellationToken
+        );
 
         var builder = new DocumentPackageBuilder(
             new SourceDetector(),
             new TestHttpClientFactory(),
             NullLogger<DocumentPackageBuilder>.Instance
         );
-        var buildResult = await builder.BuildAsync(docsPath);
+        var buildResult = await builder.BuildAsync(
+            docsPath,
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         var store = new SqlitePackageStore(
             new PackageStoreOptions(Path.Combine(_tempRoot, "packages")),
             NullLogger<SqlitePackageStore>.Instance
         );
-        var packagePath = await store.SaveAsync(buildResult);
+        var packagePath = await store.SaveAsync(buildResult, TestContext.Current.CancellationToken);
 
-        var removed = await store.RemoveAsync(buildResult.Manifest.PackageId);
+        var removed = await store.RemoveAsync(
+            buildResult.Manifest.PackageId,
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         removed.ShouldBe(1);
         File.Exists(packagePath).ShouldBeFalse();
@@ -180,7 +216,8 @@ public sealed class PackageLifecycleTests : IDisposable
         Directory.CreateDirectory(docsPath);
         await File.WriteAllTextAsync(
             Path.Combine(docsPath, "long.md"),
-            "# Section 1\n\n" + new string('a', 400) + "\n\n# Section 2\n\n" + new string('b', 400)
+            "# Section 1\n\n" + new string('a', 400) + "\n\n# Section 2\n\n" + new string('b', 400),
+            TestContext.Current.CancellationToken
         );
 
         var builder = new DocumentPackageBuilder(
@@ -188,20 +225,24 @@ public sealed class PackageLifecycleTests : IDisposable
             new TestHttpClientFactory(),
             NullLogger<DocumentPackageBuilder>.Instance
         );
-        var buildResult = await builder.BuildAsync(docsPath);
+        var buildResult = await builder.BuildAsync(
+            docsPath,
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         var store = new SqlitePackageStore(
             new PackageStoreOptions(Path.Combine(_tempRoot, "packages")),
             NullLogger<SqlitePackageStore>.Instance
         );
-        await store.SaveAsync(buildResult);
+        await store.SaveAsync(buildResult, TestContext.Current.CancellationToken);
 
         var response = await store.QueryAsync(
             new DocsQueryRequest(
                 buildResult.Manifest.PackageId,
                 "section",
                 new RetrievalOptions(MaxTokens: 150, MaxHits: 10, RelativeScoreCutoff: 0.1)
-            )
+            ),
+            TestContext.Current.CancellationToken
         );
 
         response.Hits.Count.ShouldBeGreaterThanOrEqualTo(1);

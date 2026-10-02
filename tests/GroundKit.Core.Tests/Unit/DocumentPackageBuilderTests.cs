@@ -31,11 +31,12 @@ public sealed class DocumentPackageBuilderTests : IDisposable
         Directory.CreateDirectory(docsPath);
         await File.WriteAllTextAsync(
             Path.Combine(docsPath, "intro.md"),
-            "# Introduction\n\nThis is the intro.\n\n## Details\n\nMore details here."
+            "# Introduction\n\nThis is the intro.\n\n## Details\n\nMore details here.",
+            TestContext.Current.CancellationToken
         );
 
         var builder = CreateBuilder();
-        var result = await builder.BuildAsync(docsPath);
+        var result = await builder.BuildAsync(docsPath, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Source.Kind.ShouldBe(SourceKind.LocalDirectory);
         result.Manifest.DisplayName.ShouldBe("docs");
@@ -47,10 +48,14 @@ public sealed class DocumentPackageBuilderTests : IDisposable
     [Fact]
     public async Task Should_Use_Local_Directory_Root_When_Docs_Folder_Is_Missing()
     {
-        await File.WriteAllTextAsync(Path.Combine(_tempRoot, "readme.md"), "# Readme\n\nContent.");
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempRoot, "readme.md"),
+            "# Readme\n\nContent.",
+            TestContext.Current.CancellationToken
+        );
 
         var builder = CreateBuilder();
-        var result = await builder.BuildAsync(_tempRoot);
+        var result = await builder.BuildAsync(_tempRoot, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Manifest.DocumentCount.ShouldBeGreaterThanOrEqualTo(1);
         result.Manifest.ChunkCount.ShouldBeGreaterThanOrEqualTo(1);
@@ -64,7 +69,7 @@ public sealed class DocumentPackageBuilderTests : IDisposable
 
         var builder = CreateBuilder();
 
-        var result = await builder.BuildAsync(emptyPath);
+        var result = await builder.BuildAsync(emptyPath, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Manifest.DocumentCount.ShouldBe(0);
         result.Manifest.ChunkCount.ShouldBe(0);
@@ -82,15 +87,17 @@ public sealed class DocumentPackageBuilderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(docsPath, "node_modules"));
         await File.WriteAllTextAsync(
             Path.Combine(docsPath, "node_modules", "hidden.md"),
-            "# Hidden\n\nShould be skipped."
+            "# Hidden\n\nShould be skipped.",
+            TestContext.Current.CancellationToken
         );
         await File.WriteAllTextAsync(
             Path.Combine(docsPath, "visible.md"),
-            "# Visible\n\nShould be included."
+            "# Visible\n\nShould be included.",
+            TestContext.Current.CancellationToken
         );
 
         var builder = CreateBuilder();
-        var result = await builder.BuildAsync(docsPath);
+        var result = await builder.BuildAsync(docsPath, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Documents.ShouldNotContain(document => document.Path.Contains("node_modules"));
         result.Documents.ShouldContain(document => document.Path.Contains("visible.md"));
@@ -103,11 +110,12 @@ public sealed class DocumentPackageBuilderTests : IDisposable
         Directory.CreateDirectory(docsPath);
         await File.WriteAllTextAsync(
             Path.Combine(docsPath, "dup.md"),
-            "# Title\n\nSame paragraph.\n\n# Title\n\nSame paragraph."
+            "# Title\n\nSame paragraph.\n\n# Title\n\nSame paragraph.",
+            TestContext.Current.CancellationToken
         );
 
         var builder = CreateBuilder();
-        var result = await builder.BuildAsync(docsPath);
+        var result = await builder.BuildAsync(docsPath, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Warnings.ShouldContain(warning =>
             warning.Code == BuildWarningCode.DuplicateChunkSkipped
@@ -130,7 +138,10 @@ public sealed class DocumentPackageBuilderTests : IDisposable
             }
         );
 
-        var result = await CreateBuilder(factory).BuildAsync("https://docs.example.com");
+        var result = await CreateBuilder(factory).BuildAsync(
+            "https://docs.example.com",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         result.Source.Kind.ShouldBe(SourceKind.LlmsText);
         result.Manifest.DocumentCount.ShouldBe(2);
@@ -151,7 +162,10 @@ public sealed class DocumentPackageBuilderTests : IDisposable
             }
         );
 
-        var result = await CreateBuilder(factory).BuildAsync("https://docs.example.com");
+        var result = await CreateBuilder(factory).BuildAsync(
+            "https://docs.example.com",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         result.Source.Kind.ShouldBe(SourceKind.LlmsText);
         result.Documents.ShouldHaveSingleItem();
@@ -177,7 +191,10 @@ public sealed class DocumentPackageBuilderTests : IDisposable
             }
         );
 
-        var result = await CreateBuilder(factory).BuildAsync("https://docs.example.com");
+        var result = await CreateBuilder(factory).BuildAsync(
+            "https://docs.example.com",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         result.Documents.Count.ShouldBe(2);
         result.Documents.ShouldContain(document => document.Path == "guide.md");
@@ -202,7 +219,10 @@ public sealed class DocumentPackageBuilderTests : IDisposable
             }
         );
 
-        var result = await CreateBuilder(factory).BuildAsync("https://example.com");
+        var result = await CreateBuilder(factory).BuildAsync(
+            "https://example.com",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         result.Documents.ShouldHaveSingleItem();
         result.Documents[0].Content.ShouldContain("Useful content.");
@@ -222,7 +242,10 @@ public sealed class DocumentPackageBuilderTests : IDisposable
         );
 
         var result = await CreateBuilder(factory)
-            .BuildAsync("https://github.com/agentgateway/agentgateway/blob/main/README.md");
+            .BuildAsync(
+                "https://github.com/agentgateway/agentgateway/blob/main/README.md",
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
         result.Source.Kind.ShouldBe(SourceKind.RawPage);
         result.Source.Location.ShouldBe(
@@ -248,7 +271,10 @@ public sealed class DocumentPackageBuilderTests : IDisposable
             }
         );
 
-        var result = await CreateBuilder(factory).BuildAsync("https://example.com/article");
+        var result = await CreateBuilder(factory).BuildAsync(
+            "https://example.com/article",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
 
         result.Source.Kind.ShouldBe(SourceKind.RawPage);
         result.Documents.Single().Title.ShouldBe("Article");
