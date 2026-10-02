@@ -81,7 +81,7 @@ public static class LibraryCatalog
                 "npm",
                 "TypeScript-first schema validation",
                 "https://github.com/colinhacks/zod",
-                ""
+                "packages/docs/content"
             ),
             new(
                 "axios",

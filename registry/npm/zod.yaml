@@ -4,4 +4,4 @@ repository: https://github.com/colinhacks/zod
 source:
   type: git
   url: https://github.com/colinhacks/zod
-  docs_path: .
+  docs_path: packages/docs/content
