@@ -2,19 +2,22 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$script_dir/.."
+
 usage() {
   cat <<'EOF'
 Usage:
-  ./release-version.sh prepare-train <major.minor.patch>
-  ./release-version.sh prepare-rc <major.minor.patch>
-  ./release-version.sh prepare-stable <major.minor.patch>
-  ./release-version.sh tag
+  ./scripts/release-version.sh prepare-train <major.minor.patch>
+  ./scripts/release-version.sh prepare-rc <major.minor.patch>
+  ./scripts/release-version.sh prepare-stable <major.minor.patch>
+  ./scripts/release-version.sh tag
 
 Examples:
-  ./release-version.sh prepare-train 1.1.0
-  ./release-version.sh prepare-rc 1.0.0
-  ./release-version.sh prepare-stable 1.0.0
-  ./release-version.sh tag
+  ./scripts/release-version.sh prepare-train 1.1.0
+  ./scripts/release-version.sh prepare-rc 1.0.0
+  ./scripts/release-version.sh prepare-stable 1.0.0
+  ./scripts/release-version.sh tag
 EOF
 }
 
@@ -67,7 +70,6 @@ tag_release() {
   dotnet nbgv tag
   echo "Created the NBGV tag. Push it with: git push origin <tag-name>"
 }
-
 
 case "$1" in
   prepare-train)

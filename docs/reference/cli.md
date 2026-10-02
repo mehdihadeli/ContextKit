@@ -162,7 +162,10 @@ exit without deleting anything, so removal never guesses.
 
 `install <registry/name|name|source> [version]` resolves a package from the configured registry or catalog, downloads/builds it, and installs it locally. Use `search-packages` to inspect registry versions first.
 
-The registry endpoint defaults to `http://localhost:8080`. Override it with `GROUNDKIT_REGISTRY_URL`.
+The registry endpoint defaults to
+`https://mehdihadeli.github.io/groundkit/registry/index.json`. Override it with
+`--registry-url <URL>`, `RegistryUrl`, or `GROUNDKIT_REGISTRY_URL` to use another
+catalog or API. The command option applies only to the current invocation.
 
 ### Documentation discovery warnings
 

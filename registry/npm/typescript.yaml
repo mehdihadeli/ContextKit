@@ -1,0 +1,7 @@
+name: typescript
+description: "Typed JavaScript language"
+repository: https://github.com/microsoft/TypeScript-Website
+source:
+  type: git
+  url: https://github.com/microsoft/TypeScript-Website
+  docs_path: packages/documentation/copy

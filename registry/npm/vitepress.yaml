@@ -1,0 +1,7 @@
+name: vitepress
+description: "Vite-powered documentation site generator"
+repository: https://github.com/vuejs/vitepress
+source:
+  type: git
+  url: https://github.com/vuejs/vitepress
+  docs_path: docs

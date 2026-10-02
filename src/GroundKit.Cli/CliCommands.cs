@@ -186,7 +186,7 @@ public sealed class RemoveCliCommand(CliApplication application)
 public sealed class SearchPackagesCliCommand(CliApplication application)
     : Command<SearchPackagesCliCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : RegistryUrlSettings
     {
         [CommandArgument(0, "<REGISTRY>")]
         public string Registry { get; init; } = string.Empty;
@@ -209,6 +209,7 @@ public sealed class SearchPackagesCliCommand(CliApplication application)
         {
             arguments.Add(settings.Version);
         }
+        CliCommandArguments.AddOption(arguments, "--registry-url", settings.RegistryUrl);
 
         return CliCommandArguments.Run(application, arguments);
     }
@@ -217,7 +218,7 @@ public sealed class SearchPackagesCliCommand(CliApplication application)
 public sealed class DownloadPackageCliCommand(CliApplication application)
     : Command<DownloadPackageCliCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : RegistryUrlSettings
     {
         [CommandArgument(0, "<REGISTRY>")]
         public string Registry { get; init; } = string.Empty;
@@ -233,17 +234,24 @@ public sealed class DownloadPackageCliCommand(CliApplication application)
         CommandContext context,
         Settings settings,
         CancellationToken cancellationToken
-    ) =>
-        CliCommandArguments.Run(
-            application,
-            ["download-package", settings.Registry, settings.Name, settings.Version]
-        );
+    )
+    {
+        var arguments = new List<string>
+        {
+            "download-package",
+            settings.Registry,
+            settings.Name,
+            settings.Version,
+        };
+        CliCommandArguments.AddOption(arguments, "--registry-url", settings.RegistryUrl);
+        return CliCommandArguments.Run(application, arguments);
+    }
 }
 
 public sealed class InstallCliCommand(CliApplication application)
     : Command<InstallCliCommand.Settings>
 {
-    public sealed class Settings : CommandSettings
+    public sealed class Settings : RegistryUrlSettings
     {
         [CommandArgument(0, "<REGISTRY/NAME|NAME|SOURCE>")]
         public string Requested { get; init; } = string.Empty;
@@ -263,7 +271,14 @@ public sealed class InstallCliCommand(CliApplication application)
         {
             arguments.Add(settings.Version);
         }
+        CliCommandArguments.AddOption(arguments, "--registry-url", settings.RegistryUrl);
 
         return CliCommandArguments.Run(application, arguments);
     }
+}
+
+public abstract class RegistryUrlSettings : CommandSettings
+{
+    [CommandOption("--registry-url <URL>")]
+    public string? RegistryUrl { get; init; }
 }

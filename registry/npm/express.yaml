@@ -1,0 +1,7 @@
+name: express
+description: "Node.js web framework"
+repository: https://github.com/expressjs/expressjs.com
+source:
+  type: git
+  url: https://github.com/expressjs/expressjs.com
+  docs_path: en

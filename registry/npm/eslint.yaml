@@ -1,0 +1,7 @@
+name: eslint
+description: "JavaScript code linting"
+repository: https://github.com/eslint/eslint.org
+source:
+  type: git
+  url: https://github.com/eslint/eslint.org
+  docs_path: src/content

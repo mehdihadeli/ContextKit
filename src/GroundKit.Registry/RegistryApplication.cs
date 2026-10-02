@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text.RegularExpressions;
 using GroundKit.Core.Abstractions;
 using GroundKit.Core.Contracts;
 using GroundKit.Storage.Sqlite;
@@ -9,10 +11,11 @@ namespace GroundKit.Registry;
 public sealed class RegistryApplication(
     IDocumentPackageBuilder packageBuilder,
     ILoggerFactory loggerFactory,
-    RegistryPublisher publisher
+    RegistryPublisher publisher,
+    IHttpClientFactory httpClientFactory
 )
 {
-    private readonly RegistryBundleService bundleService = new();
+    private readonly RegistryBundleService _bundleService = new();
 
     internal static string[] NormalizeArguments(string[] args)
     {
@@ -48,6 +51,7 @@ public sealed class RegistryApplication(
                 "publish-all" => await BuildAllAsync(args, true),
                 "bundle" => await BundleAsync(args),
                 "import-bundle" => await ImportBundleAsync(args),
+                "catalog-index" => await CatalogIndexAsync(args),
                 _ => ShowHelp(),
             };
         }
@@ -230,8 +234,20 @@ public sealed class RegistryApplication(
         };
         var destination =
             Option(args, "--destination") ?? Path.Combine(output, "groundkit-registry" + extension);
-        var path = await bundleService.CreateAsync(output, destination);
+        var path = await _bundleService.CreateAsync(output, destination);
         AnsiConsole.MarkupLine($"[green]Bundle created:[/] {Markup.Escape(path)}");
+        return 0;
+    }
+
+    private async Task<int> CatalogIndexAsync(string[] args)
+    {
+        var index = await new RegistryCatalogService().CreateAsync(
+            Option(args, "--dir") ?? "registry",
+            Option(args, "--output") ?? "./dist-packages",
+            Option(args, "--destination") ?? "./dist-catalog",
+            Option(args, "--base-url") ?? throw new ArgumentException("--base-url is required for catalog-index.")
+        );
+        AnsiConsole.MarkupLine($"[green]Catalog created:[/] {Markup.Escape(index)}");
         return 0;
     }
 
@@ -243,7 +259,7 @@ public sealed class RegistryApplication(
             return 1;
         }
         var output = Option(args, "--output") ?? "./dist-packages";
-        var paths = await bundleService.ImportAsync(args[1], output);
+        var paths = await _bundleService.ImportAsync(args[1], output);
         AnsiConsole.MarkupLine($"[green]Imported {paths.Count} package(s).[/]");
         return 0;
     }
@@ -254,43 +270,127 @@ public sealed class RegistryApplication(
         (string Version, string? Tag) selected
     )
     {
-        if (definition.Kind == SourceKind.LocalDirectory && !Directory.Exists(definition.Source))
+        var versionDefinition = definition.Versions.FirstOrDefault(item => item.Version == selected.Version);
+        var source = versionDefinition?.Source ?? definition.Source;
+        var docsPath = versionDefinition?.DocsPath ?? definition.DocsPath;
+        var sourceType = versionDefinition?.SourceType ?? definition.SourceType;
+        var excludePaths = versionDefinition?.ExcludePaths ?? definition.ExcludePaths;
+        var temporaryDirectory = (string?)null;
+
+        if (string.Equals(sourceType, "zip", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceType, "archive", StringComparison.OrdinalIgnoreCase))
+        {
+            temporaryDirectory = await ExtractArchiveAsync(
+                source.Replace("{version}", selected.Version, StringComparison.Ordinal),
+                excludePaths ?? []
+            );
+            source = temporaryDirectory;
+        }
+
+        if (!Directory.Exists(source) && !Uri.TryCreate(source, UriKind.Absolute, out _))
         {
             throw new DirectoryNotFoundException(
-                $"Source directory was not found: {definition.Source}"
+                $"Source directory was not found: {source}"
             );
         }
 
-        var result = await packageBuilder.BuildAsync(
-            definition.Source,
-            definition.DocsPath,
-            default,
-            selected.Version,
-            selected.Tag
-        );
-        var displayName = string.IsNullOrWhiteSpace(definition.Description)
-            ? definition.Name
-            : definition.Description;
-        var normalized = result with
+        try
         {
-            Source = result.Source with
+            var result = await packageBuilder.BuildAsync(
+                source,
+                docsPath?.Replace("{version}", selected.Version, StringComparison.Ordinal),
+                default,
+                selected.Version,
+                selected.Tag
+            );
+            var displayName = string.IsNullOrWhiteSpace(definition.Description)
+                ? definition.Name
+                : definition.Description;
+            var normalized = result with
             {
-                CanonicalId = definition.Name,
-                DisplayName = displayName,
-            },
-            Manifest = result.Manifest with
+                Source = result.Source with
+                {
+                    CanonicalId = definition.Name,
+                    DisplayName = displayName,
+                },
+                Manifest = result.Manifest with
+                {
+                    PackageId = definition.Name,
+                    DisplayName = displayName,
+                    Version = selected.Version,
+                    SourceCanonicalId = definition.Name,
+                },
+            };
+            var store = new SqlitePackageStore(
+                new PackageStoreOptions(Path.GetFullPath(output)),
+                loggerFactory.CreateLogger<SqlitePackageStore>()
+            );
+            return await store.SaveAsync(normalized);
+        }
+        finally
+        {
+            if (temporaryDirectory is not null && Directory.Exists(temporaryDirectory))
             {
-                PackageId = definition.Name,
-                DisplayName = displayName,
-                Version = selected.Version,
-                SourceCanonicalId = definition.Name,
-            },
-        };
-        var store = new SqlitePackageStore(
-            new PackageStoreOptions(Path.GetFullPath(output)),
-            loggerFactory.CreateLogger<SqlitePackageStore>()
-        );
-        return await store.SaveAsync(normalized);
+                Directory.Delete(temporaryDirectory, recursive: true);
+            }
+        }
+    }
+
+    private async Task<string> ExtractArchiveAsync(
+        string source,
+        IReadOnlyList<string> excludePaths
+    )
+    {
+        var archivePath = Path.Combine(Path.GetTempPath(), $"groundkit-{Guid.NewGuid():N}.zip");
+        var extractPath = Path.Combine(Path.GetTempPath(), $"groundkit-{Guid.NewGuid():N}");
+        try
+        {
+            using var client = httpClientFactory.CreateClient();
+            await using (var response = await client.GetStreamAsync(source))
+            await using (var archive = File.Create(archivePath))
+            {
+                await response.CopyToAsync(archive);
+            }
+
+            Directory.CreateDirectory(extractPath);
+            ZipFile.ExtractToDirectory(archivePath, extractPath);
+            foreach (var file in Directory.EnumerateFiles(extractPath, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(extractPath, file).Replace('\\', '/');
+                var relativeWithoutArchiveRoot = relative[(relative.IndexOf('/') + 1)..];
+                if (
+                    excludePaths.Any(pattern =>
+                        GlobMatches(pattern, relative)
+                        || GlobMatches(pattern, relativeWithoutArchiveRoot)
+                    )
+                )
+                {
+                    File.Delete(file);
+                }
+            }
+            return extractPath;
+        }
+        catch
+        {
+            if (Directory.Exists(extractPath))
+            {
+                Directory.Delete(extractPath, recursive: true);
+            }
+            throw;
+        }
+        finally
+        {
+            if (File.Exists(archivePath))
+            {
+                File.Delete(archivePath);
+            }
+        }
+    }
+
+    private static bool GlobMatches(string pattern, string value)
+    {
+        var regex = "^" + Regex.Escape(pattern).Replace("\\*\\*", ".*").Replace("\\*", "[^/]*") + "$";
+        return Regex.IsMatch(value, regex, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static (string Version, string? Tag) SelectVersion(
@@ -327,7 +427,7 @@ public sealed class RegistryApplication(
     private static IReadOnlyList<RegistryDefinition> Load(string[] args)
     {
         var definitions = RegistryDefinitionLoader.LoadDirectory(
-            Option(args, "--dir") ?? "registry/packages"
+            Option(args, "--dir") ?? "registry"
         );
         RegistryDefinitionLoader.Validate(definitions);
         return definitions;
@@ -345,7 +445,7 @@ public sealed class RegistryApplication(
     private static int ShowHelp()
     {
         AnsiConsole.MarkupLine(
-            "groundkit-registry list|validate|build|build-all|publish|publish-all|bundle|import-bundle [--dir <path>] [--output <path>]"
+            "groundkit registry list|validate|build|build-all|publish|publish-all|bundle|import-bundle|catalog-index [--dir <path>] [--output <path>]"
         );
         return 0;
     }

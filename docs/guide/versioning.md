@@ -74,7 +74,7 @@ later accepted changes publish the next preview number.
 Start a new preview train with a reviewed version-intent change:
 
 ```bash
-./release-version.sh prepare-train 1.1.0
+./scripts/release-version.sh prepare-train 1.1.0
 git add version.json
 git commit -m "chore: start 1.1.0 preview train"
 git push
@@ -93,7 +93,7 @@ validation succeeds.
 Prepare the first RC train:
 
 ```bash
-./release-version.sh prepare-rc 1.0.0
+./scripts/release-version.sh prepare-rc 1.0.0
 git add version.json
 git commit -m "chore: prepare 1.0.0 RC train"
 git push -u origin chore/prepare-1.0.0-rc
@@ -103,7 +103,7 @@ After the pull request is merged and local `main` is updated, create and push
 the tag:
 
 ```bash
-./release-version.sh tag
+./scripts/release-version.sh tag
 git push origin v1.0.0-rc.1
 ```
 
@@ -113,7 +113,7 @@ Later RC fixes do not edit `version.json`; another merge advances the
 Prepare stable in the same way:
 
 ```bash
-./release-version.sh prepare-stable 1.0.0
+./scripts/release-version.sh prepare-stable 1.0.0
 git add version.json
 git commit -m "chore: prepare 1.0.0"
 git push -u origin chore/prepare-1.0.0
@@ -122,7 +122,7 @@ git push -u origin chore/prepare-1.0.0
 After that change is merged and validated:
 
 ```bash
-./release-version.sh tag
+./scripts/release-version.sh tag
 git push origin v1.0.0
 ```
 

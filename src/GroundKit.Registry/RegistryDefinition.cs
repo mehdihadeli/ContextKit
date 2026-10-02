@@ -12,7 +12,8 @@ public sealed record RegistryDefinition(
     string? DocsPath,
     string? Ref,
     string TagPattern,
-    IReadOnlyList<RegistryVersion> Versions
+    IReadOnlyList<RegistryVersion> Versions,
+    IReadOnlyList<string>? ExcludePaths = null
 )
 {
     public string PackageId => Name;
@@ -24,6 +25,8 @@ public sealed record RegistryDefinition(
             "local" or "directory" => SourceKind.LocalDirectory,
             "llms.txt" or "llms" => SourceKind.LlmsText,
             "raw" or "page" => SourceKind.RawPage,
+            "zip" or "archive" => SourceKind.ZipArchive,
+            "html-index" or "html_index" => SourceKind.HtmlIndex,
             _ => SourceKind.Unknown,
         };
 
@@ -40,22 +43,34 @@ public sealed record RegistryDefinition(
         return Versions
             .Select<RegistryVersion, (string Version, string? Tag)>(version =>
             {
-                string? tag = version.Tag ?? TagPattern.Replace("{version}", version.Version);
-                return (Version: version.Version, Tag: tag);
+                var tag = version.Tag
+                    ?? version.Ref
+                    ?? (version.TagPattern ?? TagPattern).Replace("{version}", version.Version);
+                return (version.Version, tag);
             })
             .ToArray();
     }
 }
 
-public sealed record RegistryVersion(string Version, string? Tag);
+public sealed record RegistryVersion(
+    string Version,
+    string? Tag,
+    string? SourceType = null,
+    string? Source = null,
+    string? DocsPath = null,
+    string? TagPattern = null,
+    IReadOnlyList<string>? ExcludePaths = null,
+    string? Ref = null
+);
 
 public static class RegistryDefinitionLoader
 {
     public const string DefaultRegistry = "packages";
+    public const string RegistryRoot = "registry";
 
     public static IReadOnlyList<RegistryDefinition> LoadDirectory(
         string directory,
-        string registry = DefaultRegistry
+        string registry = RegistryRoot
     )
     {
         if (!Directory.Exists(directory))
@@ -66,11 +81,56 @@ public static class RegistryDefinitionLoader
         return Directory
             .EnumerateFiles(directory, "*.yaml", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .Select(path => LoadFile(path, registry))
+            .Select(path =>
+            {
+                var resolvedRegistry = ResolveRegistry(path, directory, registry);
+                return LoadFile(path, resolvedRegistry, GetPackageName(path, directory, resolvedRegistry));
+            })
             .ToArray();
     }
 
+    private static string GetPackageName(string path, string directory, string registry)
+    {
+        var segments = Path.GetRelativePath(directory, path)
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
+        if (string.Equals(registry, RegistryRoot, StringComparison.OrdinalIgnoreCase) is false
+            && segments.Count > 1)
+        {
+            segments.RemoveAt(0);
+        }
+
+        var relative = string.Join('/', segments);
+        return relative.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)
+            ? relative[..^5]
+            : relative;
+    }
+
+    private static string ResolveRegistry(string path, string directory, string registry)
+    {
+        if (!string.Equals(registry, RegistryRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return registry;
+        }
+
+        var relative = Path.GetRelativePath(directory, path)
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToArray();
+        return relative.Length > 1 ? relative[0] : DefaultRegistry;
+    }
+
     public static RegistryDefinition LoadFile(string path, string registry = DefaultRegistry)
+    {
+        return LoadFile(path, registry, null);
+    }
+
+    private static RegistryDefinition LoadFile(
+        string path,
+        string registry,
+        string? expectedPackageName
+    )
     {
         using var reader = File.OpenText(path);
         var yaml = new YamlStream();
@@ -107,9 +167,17 @@ public static class RegistryDefinitionLoader
         var docsPath = Optional(sourceNode, "docs_path");
         var sourceRef = Optional(sourceNode, "ref");
         var tagPattern = Optional(root, "tag_pattern") ?? "v{version}";
+        var excludePaths = ReadStringSequence(sourceNode, "exclude_paths", path, "source");
         var versions = ReadVersions(root, path);
-        var expectedName = Path.GetFileNameWithoutExtension(path);
-        if (!string.Equals(name, expectedName, StringComparison.OrdinalIgnoreCase))
+        if (versions.Count > 0 && root.Children.ContainsKey(new YamlScalarNode("source")))
+        {
+            throw Invalid(path, "versioned definitions must put source inside each version");
+        }
+        var expectedName = expectedPackageName ?? Path.GetFileNameWithoutExtension(path);
+        if (
+            !string.Equals(name, expectedName, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(name, Path.GetFileNameWithoutExtension(path), StringComparison.OrdinalIgnoreCase)
+        )
         {
             throw Invalid(path, $"name '{name}' does not match filename '{expectedName}'");
         }
@@ -123,7 +191,8 @@ public static class RegistryDefinitionLoader
             docsPath,
             sourceRef,
             tagPattern,
-            versions
+            versions,
+            excludePaths
         );
         Validate(definition, path);
         return definition;
@@ -149,9 +218,64 @@ public static class RegistryDefinitionLoader
                     throw Invalid(path, "each version must be a mapping");
                 }
 
-                var version = Required(mapping, "version", path, "versions");
-                return new RegistryVersion(version, Optional(mapping, "tag"));
+                var versionValues = Optional(mapping, "version") is { } singleVersion
+                    ? [singleVersion]
+                    : Optional(mapping, "min_version") is { } minimumVersion
+                        ? [minimumVersion]
+                        : ReadStringSequence(mapping, "versions", path, "versions");
+                if (versionValues.Count == 0)
+                {
+                    throw Invalid(path, "versions.version, versions.min_version, or versions.versions is required");
+                }
+
+                var versionSource = mapping.Children.TryGetValue(new YamlScalarNode("source"), out var sourceNode)
+                    ? sourceNode as YamlMappingNode
+                    : null;
+                var sourceType = versionSource is null ? null : Required(versionSource, "type", path, "versions.source");
+                var source = versionSource is null
+                    ? null
+                    : Optional(versionSource, "url") ?? Optional(versionSource, "path");
+                var docsPath = versionSource is null ? null : Optional(versionSource, "docs_path");
+                var sourceRef = versionSource is null ? null : Optional(versionSource, "ref");
+                var excludePaths = versionSource is null
+                    ? null
+                    : ReadStringSequence(versionSource, "exclude_paths", path, "versions.source");
+                return versionValues.Select(version => new RegistryVersion(
+                    version,
+                    Optional(mapping, "tag"),
+                    sourceType,
+                    source,
+                    docsPath,
+                    Optional(mapping, "tag_pattern"),
+                    excludePaths,
+                    sourceRef
+                )).ToArray();
             })
+            .SelectMany(versions => versions)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ReadStringSequence(
+        YamlMappingNode mapping,
+        string key,
+        string path,
+        string prefix
+    )
+    {
+        if (!mapping.Children.TryGetValue(new YamlScalarNode(key), out var node))
+        {
+            return [];
+        }
+
+        if (node is not YamlSequenceNode sequence)
+        {
+            throw Invalid(path, $"{prefix}.{key} must be a sequence");
+        }
+
+        return sequence.Children
+            .Select(item => (item as YamlScalarNode)?.Value?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
             .ToArray();
     }
 

@@ -1,0 +1,7 @@
+name: tailwindcss
+description: "Utility-first CSS framework"
+repository: https://github.com/tailwindlabs/tailwindcss.com
+source:
+  type: git
+  url: https://github.com/tailwindlabs/tailwindcss.com
+  docs_path: src/docs

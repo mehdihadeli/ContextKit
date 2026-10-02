@@ -3,6 +3,7 @@
     <Project Path="src/GroundKit.Abstractions/GroundKit.Abstractions.csproj" />
     <Project Path="src/GroundKit.Core/GroundKit.Core.csproj" />
     <Project Path="src/GroundKit.Hosting/GroundKit.Hosting.csproj" />
+    <Project Path="src/GroundKit.Registry.Server/GroundKit.Registry.Server.csproj" />
     <Project Path="src/GroundKit.ServiceDefaults/GroundKit.ServiceDefaults.csproj" />
     <Project Path="src/GroundKit.Storage.Sqlite/GroundKit.Storage.Sqlite.csproj" />
     <Project Path="src/GroundKit.Cli/GroundKit.Cli.csproj" />

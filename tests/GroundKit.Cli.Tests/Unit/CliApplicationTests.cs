@@ -77,13 +77,92 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public async Task Should_Apply_Per_Command_Registry_Url_To_Install()
+    {
+        const string registryUrl = "https://registry.example.com";
+        var previousRegistryUrl = Environment.GetEnvironmentVariable("GROUNDKIT_REGISTRY_URL");
+        try
+        {
+            Environment.SetEnvironmentVariable("GROUNDKIT_REGISTRY_URL", null);
+            var source = new DocumentationSource(SourceKind.LocalDirectory, "docs", "Docs", "C:/docs");
+            var downloader = Substitute.For<IPackageDownloadService>();
+            downloader
+                .InstallAsync("npm/react", null, Arg.Any<CancellationToken>())
+                .Returns("C:/packages/react@latest.db");
+            var application = new CliApplication(
+                new RecordingPackageBuilder(CreateBuildResult(source)),
+                new RecordingPackageStore(source, "C:/packages/docs@dev.db"),
+                packageDownloadService: downloader
+            );
+
+            var exitCode = await application.RunAsync(
+                ["install", "npm/react", "--registry-url", registryUrl]
+            );
+
+            exitCode.ShouldBe(0);
+            Environment.GetEnvironmentVariable("GROUNDKIT_REGISTRY_URL").ShouldBe(registryUrl);
+            await downloader.Received(1).InstallAsync("npm/react", null, Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GROUNDKIT_REGISTRY_URL", previousRegistryUrl);
+        }
+    }
+
+    [Fact]
+    public async Task Should_Search_Packages_Through_Registry_Client()
+    {
+        var source = new DocumentationSource(SourceKind.LocalDirectory, "docs", "Docs", "C:/docs");
+        var registryClient = Substitute.For<IContextRegistryClient>();
+        registryClient
+            .SearchAsync("npm", "react", "19.1.0", Arg.Any<CancellationToken>())
+            .Returns([new RegistryPackage("react", "npm", "19.1.0", "UI library", 42)]);
+        var application = new CliApplication(
+            new RecordingPackageBuilder(CreateBuildResult(source)),
+            new RecordingPackageStore(source, "C:/packages/docs@dev.db"),
+            registryClient
+        );
+
+        var exitCode = await application.RunAsync(["search-packages", "npm", "react", "19.1.0"]);
+
+        exitCode.ShouldBe(0);
+        await registryClient.Received(1)
+            .SearchAsync("npm", "react", "19.1.0", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Should_Download_Exact_Package_Through_Registry_Service()
+    {
+        var source = new DocumentationSource(SourceKind.LocalDirectory, "docs", "Docs", "C:/docs");
+        var downloader = Substitute.For<IPackageDownloadService>();
+        downloader
+            .InstallRegistryPackageAsync("pip", "django", "5.1", Arg.Any<CancellationToken>())
+            .Returns("C:/packages/django@5.1.db");
+        var application = new CliApplication(
+            new RecordingPackageBuilder(CreateBuildResult(source)),
+            new RecordingPackageStore(source, "C:/packages/docs@dev.db"),
+            packageDownloadService: downloader
+        );
+
+        var exitCode = await application.RunAsync(["download-package", "pip", "django", "5.1"]);
+
+        exitCode.ShouldBe(0);
+        await downloader.Received(1)
+            .InstallRegistryPackageAsync("pip", "django", "5.1", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Should_Add_Local_Package_File_Through_Download_Service()
     {
         var packagePath = Path.Combine(
             Path.GetTempPath(),
             $"mattpocock-skills@1.2.3-{Guid.NewGuid():N}.db"
         );
-        await File.WriteAllBytesAsync(packagePath, [1, 2, 3]);
+        await File.WriteAllBytesAsync(
+            packagePath,
+            [1, 2, 3],
+            TestContext.Current.CancellationToken
+        );
         try
         {
             var source = new DocumentationSource(

@@ -30,8 +30,8 @@ Most MCP clients accept a JSON server entry. Adapt the command shape to the host
 {
   "mcpServers": {
     "groundkit": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/path/to/groundkit-mcp"]
+      "command": "groundkit",
+      "args": ["mcp"]
     }
   }
 }
@@ -39,7 +39,7 @@ Most MCP clients accept a JSON server entry. Adapt the command shape to the host
 
 On Windows, use an absolute project path with forward or escaped backslashes. A published server can instead use `"command": "groundkit-mcp"`.
 
-For an HTTP server, start GroundKit with `groundkit-mcp --http 4000` and configure
+For an HTTP server, start GroundKit with `groundkit mcp --http 4000` and configure
 the MCP host with `http://127.0.0.1:4000/mcp`:
 
 ```json

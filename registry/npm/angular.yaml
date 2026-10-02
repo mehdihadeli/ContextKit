@@ -1,0 +1,7 @@
+name: angular
+description: "Web application framework"
+repository: https://github.com/angular/angular
+source:
+  type: git
+  url: https://github.com/angular/angular
+  docs_path: adev/src/content

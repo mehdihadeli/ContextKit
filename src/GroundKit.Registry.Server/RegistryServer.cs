@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 
-namespace GroundKit.Registry;
+namespace GroundKit.Registry.Server;
 
 public static class RegistryServer
 {

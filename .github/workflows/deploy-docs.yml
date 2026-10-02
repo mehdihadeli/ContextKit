@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_run:
+    workflows: [Registry Update]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -16,6 +20,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -41,6 +46,20 @@ jobs:
         working-directory: docs
         run: npm run build
 
+      - name: Include newest published registry catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --slurp \
+            | jq -r '[.[][] | select(.draft == false and (.tag_name | test("^registry-[0-9]+-[0-9]+$")))] | sort_by(.published_at) | last | .tag_name // empty')
+          if [ -n "$tag" ]; then
+            mkdir -p docs/.vitepress/dist/registry
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern index.json --dir docs/.vitepress/dist/registry --clobber
+          else
+            echo "No published registry snapshot yet; deploying documentation only."
+          fi
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
@@ -56,3 +75,9 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Report registry catalog URL
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          printf 'Registry catalog (available after first snapshot): %s/registry/index.json\n' "${PAGE_URL%/}" >> "$GITHUB_STEP_SUMMARY"

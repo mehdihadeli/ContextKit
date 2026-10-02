@@ -1,0 +1,7 @@
+name: playwright
+description: "Browser automation library"
+repository: https://github.com/microsoft/playwright.dev
+source:
+  type: git
+  url: https://github.com/microsoft/playwright.dev
+  docs_path: nodejs/docs

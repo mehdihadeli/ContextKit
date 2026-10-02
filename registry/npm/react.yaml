@@ -1,0 +1,7 @@
+name: react
+description: "User interface library"
+repository: https://github.com/reactjs/react.dev
+source:
+  type: git
+  url: https://github.com/reactjs/react.dev
+  docs_path: src/content
