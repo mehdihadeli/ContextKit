@@ -114,7 +114,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for runtime in linux-x64 osx-x64 osx-arm64; do
+          for runtime in linux-x64 osx-x64 osx-arm64 win-x64; do
             publish_dir="release/$runtime"
             mkdir -p "$publish_dir"
             dotnet publish src/GroundKit.Cli/GroundKit.Cli.csproj \
@@ -125,7 +125,11 @@ jobs:
               -p:PublishSingleFile=true \
               -p:IncludeNativeLibrariesForSelfExtract=true \
               -p:PublishTrimmed=false
-            tar -czf "artifacts/groundkit-$runtime.tar.gz" -C "$publish_dir" GroundKit.Cli
+            if [[ "$runtime" == win-* ]]; then
+              (cd "$publish_dir" && zip -q "../../artifacts/groundkit-$runtime.zip" GroundKit.Cli.exe)
+            else
+              tar -czf "artifacts/groundkit-$runtime.tar.gz" -C "$publish_dir" GroundKit.Cli
+            fi
           done
 
       - name: Publish matching Release Drafter draft
@@ -145,4 +149,4 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs['calculate-version'].outputs.version) }}" artifacts/groundkit-*.tar.gz --clobber
+        run: gh release upload "${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs['calculate-version'].outputs.version) }}" artifacts/groundkit-* --clobber
