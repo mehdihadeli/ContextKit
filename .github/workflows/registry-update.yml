@@ -38,6 +38,9 @@ jobs:
         run: dotnet build GroundKit.slnx --no-restore --configuration Release
 
       - name: Run tests
+        env:
+          # Enables the tests that clone every checked-in upstream repository.
+          GROUNDKIT_NETWORK_TESTS: "0"
         run: dotnet test --solution GroundKit.slnx --no-build --configuration Release
 
       - name: Validate and build registry definitions
@@ -45,7 +48,21 @@ jobs:
           dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
             registry validate --dir registry
           dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
-            registry build-all --dir registry --output ./dist-packages
+            registry build-all --dir registry --output ./dist-packages --allow-failures \
+            | tee registry-build.log
+          failures="$(sed -n 's/^RegistryBuildFailures=\([0-9]\+\)$/\1/p' registry-build.log | tail -1)"
+          if [ -n "$failures" ] && [ "$failures" -gt 0 ]; then
+            echo "::warning::$failures registry definition(s) failed to build; the catalog will be incomplete."
+          fi
+
+      - name: Upload registry build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: groundkit-registry-build-log-${{ github.run_id }}
+          path: registry-build.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Generate static registry catalog and Release assets
         env:

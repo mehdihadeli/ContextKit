@@ -1,7 +1,7 @@
 name: fastify
 description: "Fast Node.js web framework"
-repository: https://github.com/fastify/website
+repository: https://github.com/fastify/fastify
 source:
   type: git
-  url: https://github.com/fastify/website
+  url: https://github.com/fastify/fastify
   docs_path: docs

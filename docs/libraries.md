@@ -16,7 +16,7 @@ description: Browse the curated library catalog and build local documentation pa
   </div>
 
   <div class="library-summary" aria-label="Library catalog summary">
-    <div><strong>20</strong><span>curated sources</span></div>
+    <div><strong>19</strong><span>curated sources</span></div>
     <div><strong>npm</strong><span>package registry</span></div>
     <div><strong>SQLite</strong><span>local artifact</span></div>
   </div>
@@ -31,7 +31,6 @@ description: Browse the curated library catalog and build local documentation pa
     <a class="library-card" href="/guide/quickstart"><strong>express</strong><span>Node.js web framework</span><code>add express</code></a>
     <a class="library-card" href="/guide/quickstart"><strong>fastify</strong><span>Fast Node.js web framework</span><code>add fastify</code></a>
     <a class="library-card" href="/guide/quickstart"><strong>nestjs</strong><span>Node.js server framework</span><code>add nestjs</code></a>
-    <a class="library-card" href="/guide/quickstart"><strong>prisma</strong><span>Type-safe database toolkit</span><code>add prisma</code></a>
     <a class="library-card" href="/guide/quickstart"><strong>zod</strong><span>TypeScript-first schema validation</span><code>add zod</code></a>
     <a class="library-card" href="/guide/quickstart"><strong>axios</strong><span>Promise-based HTTP client</span><code>add axios</code></a>
     <a class="library-card" href="/guide/quickstart"><strong>graphql</strong><span>Query language and runtime</span><code>add graphql</code></a>

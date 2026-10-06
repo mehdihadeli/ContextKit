@@ -14,7 +14,7 @@ Finds installed packages by package ID or display name.
 
 ## `library_catalog`
 
-Lists the 20 curated starter sources, optionally filtered by name or description.
+Lists the 19 curated starter sources, optionally filtered by name or description.
 
 ## `search_packages`
 

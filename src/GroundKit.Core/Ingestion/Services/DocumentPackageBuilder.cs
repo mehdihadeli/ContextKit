@@ -769,7 +769,7 @@ public sealed class DocumentPackageBuilder(
             if (checkoutProcess.ExitCode != 0)
             {
                 throw new InvalidOperationException(
-                    $"Git checkout failed for '{source.Location}' with exit code {checkoutProcess.ExitCode}."
+                    $"Git checkout of '{source.DocsPath ?? "."}' failed for '{source.Location}' with exit code {checkoutProcess.ExitCode}. Verify the configured docs path exists in the repository."
                 );
             }
 
