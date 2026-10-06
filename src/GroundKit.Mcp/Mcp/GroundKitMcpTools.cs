@@ -226,7 +226,7 @@ public static class GroundKitMcpTools
         OutputSchemaType = typeof(LibraryCatalogPayload)
     )]
     [Description(
-        "Browse 20 curated library documentation sources available for local package building."
+        "Browse 19 curated library documentation sources available for local package building."
     )]
     public static async Task<CallToolResult> LibraryCatalogAsync(
         [Description("Optional library name or keyword filter.")] string? query,

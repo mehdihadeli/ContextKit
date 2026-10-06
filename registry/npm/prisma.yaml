@@ -1,7 +1,0 @@
-name: prisma
-description: "Type-safe database toolkit"
-repository: https://github.com/prisma/docs
-source:
-  type: git
-  url: https://github.com/prisma/docs
-  docs_path: content

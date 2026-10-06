@@ -4,4 +4,4 @@ repository: https://github.com/axios/axios-docs
 source:
   type: git
   url: https://github.com/axios/axios-docs
-  docs_path: docs
+  docs_path: posts/en

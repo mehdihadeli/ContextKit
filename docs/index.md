@@ -37,7 +37,7 @@ Start with the workflow that matches your next task. Each path leads to a concre
 <div class="home-paths">
   <a href="/libraries" class="home-path">
     <strong>Find a library</strong>
-    <span>Browse 20 curated sources and build one with a short command.</span>
+    <span>Browse 19 curated sources and build one with a short command.</span>
   </a>
   <a href="/features" class="home-path">
     <strong>Understand the workflow</strong>

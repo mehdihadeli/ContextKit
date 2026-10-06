@@ -53,13 +53,13 @@ public static class LibraryCatalog
                 "npm",
                 "Node.js web framework",
                 "https://github.com/expressjs/expressjs.com",
-                "en"
+                "src/content/docs/en/5x"
             ),
             new(
                 "fastify",
                 "npm",
                 "Fast Node.js web framework",
-                "https://github.com/fastify/website",
+                "https://github.com/fastify/fastify",
                 "docs"
             ),
             new(
@@ -67,13 +67,6 @@ public static class LibraryCatalog
                 "npm",
                 "Node.js server framework",
                 "https://github.com/nestjs/docs.nestjs.com",
-                "content"
-            ),
-            new(
-                "prisma",
-                "npm",
-                "Type-safe database toolkit",
-                "https://github.com/prisma/docs",
                 "content"
             ),
             new(
@@ -88,7 +81,7 @@ public static class LibraryCatalog
                 "npm",
                 "Promise-based HTTP client",
                 "https://github.com/axios/axios-docs",
-                "docs"
+                "posts/en"
             ),
             new(
                 "graphql",
@@ -136,8 +129,8 @@ public static class LibraryCatalog
                 "prettier",
                 "npm",
                 "Opinionated code formatter",
-                "https://github.com/prettier/prettier.com",
-                "src/content"
+                "https://github.com/prettier/prettier",
+                "docs"
             ),
             new(
                 "vitepress",

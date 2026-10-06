@@ -118,7 +118,8 @@ public sealed class RegistryApplication(
         if (args.Length < 2)
         {
             AnsiConsole.MarkupLine(
-                "[red]Usage:[/] build <name> [version] [--dir <path>] [--output <path>]"
+                "[red]Usage:[/] "
+                    + Markup.Escape("build <name> [version] [--dir <path>] [--output <path>]")
             );
             return 1;
         }
@@ -139,7 +140,8 @@ public sealed class RegistryApplication(
         if (args.Length < 2)
         {
             AnsiConsole.MarkupLine(
-                "[red]Usage:[/] publish <name> [version] [--dir <path>] [--output <path>]"
+                "[red]Usage:[/] "
+                    + Markup.Escape("publish <name> [version] [--dir <path>] [--output <path>]")
             );
             return 1;
         }
@@ -170,6 +172,7 @@ public sealed class RegistryApplication(
     {
         var definitions = Load(args);
         var output = Option(args, "--output") ?? "./dist-packages";
+        var allowFailures = Flag(args, "--allow-failures");
         Directory.CreateDirectory(output);
         var failures = 0;
         var succeeded = 0;
@@ -219,7 +222,13 @@ public sealed class RegistryApplication(
         }
 
         AnsiConsole.MarkupLine($"Summary: {succeeded} succeeded, {failures} failed.");
-        return failures == 0 ? 0 : 1;
+        AnsiConsole.MarkupLine($"RegistryBuildFailures={failures}");
+        if (failures == 0)
+        {
+            return 0;
+        }
+
+        return allowFailures && succeeded > 0 ? 0 : 1;
     }
 
     private async Task<int> BundleAsync(string[] args)
@@ -255,7 +264,9 @@ public sealed class RegistryApplication(
     {
         if (args.Length < 2)
         {
-            AnsiConsole.MarkupLine("[red]Usage:[/] import-bundle <path> [--output <path>]");
+            AnsiConsole.MarkupLine(
+                "[red]Usage:[/] " + Markup.Escape("import-bundle <path> [--output <path>]")
+            );
             return 1;
         }
         var output = Option(args, "--output") ?? "./dist-packages";
@@ -442,10 +453,18 @@ public sealed class RegistryApplication(
         return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 
+    private static bool Flag(string[] args, string name) =>
+        Array.Exists(
+            args,
+            arg => string.Equals(NormalizeOption(arg), name, StringComparison.OrdinalIgnoreCase)
+        );
+
     private static int ShowHelp()
     {
         AnsiConsole.MarkupLine(
-            "groundkit registry list|validate|build|build-all|publish|publish-all|bundle|import-bundle|catalog-index [--dir <path>] [--output <path>]"
+            Markup.Escape(
+                "groundkit registry list|validate|build|build-all|publish|publish-all|bundle|import-bundle|catalog-index [--dir <path>] [--output <path>] [--allow-failures]"
+            )
         );
         return 0;
     }

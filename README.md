@@ -42,7 +42,7 @@ GroundKit is meant to cover the full local documentation workflow:
 - MCP server with stdio and Streamable HTTP transports.
 - MCP tools for source resolution and docs querying.
 - Context7-style MCP compatibility tools: `get_docs` and `library_catalog`.
-- Curated starter catalog of 20 popular JavaScript and web libraries.
+- Curated starter catalog of 19 popular JavaScript and web libraries.
 - Declarative `registry/` starter definitions mirroring the curated catalog.
 - Registry client with package search, versioned download, and local fallback.
 - CLI commands for local package lifecycle, registry workflows, catalog discovery, and MCP serving.
