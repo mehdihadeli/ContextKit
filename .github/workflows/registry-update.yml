@@ -103,14 +103,17 @@ jobs:
             --oci-references ./oci-references.json
           echo "::notice::Packages published to $oci_repository"
 
-      - name: Make registry packages publicly pullable
-        # GHCR creates packages private on first publish; installs are anonymous, so they must be
-        # public. Best effort, because the job token cannot always administer packages: every failure
-        # is reported as a warning so a leftover private package is visible in the run, and the
-        # anonymous install check below fails when one remains.
+      - name: Verify registry packages are anonymously pullable
+        # GHCR creates packages private on first publish and installs are anonymous, so every package
+        # must be public. GitHub exposes no way to change that programmatically: the Packages REST API
+        # has only GET, DELETE and restore, so PATCH/PUT against `/user/packages/container/<name>`
+        # returns 404 (verified against both the user and org namespaces). Visibility is a UI-only
+        # action, and for a personal account it has to be repeated per package, so this step reports
+        # instead of pretending to fix anything: it probes each package exactly the way a consumer
+        # client does and names the ones that would fail to install.
+        # Deliberately non-fatal - the anonymous install check below is the authoritative gate, and
+        # failing here on visibility alone would hide a real pull regression.
         continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           # jq keys are case sensitive and both generated files use the C# record property names
           # verbatim, so the paths below are PascalCase. A wrong path makes jq iterate over null,
@@ -118,38 +121,48 @@ jobs:
           # turns this step into a no-op, so the package count is asserted first.
           total="$(jq -r '.Packages | length' ./oci-references.json)"
           if [ -z "$total" ] || [ "$total" -eq 0 ]; then
-            echo "::error::oci-references.json lists no packages; nothing can be made public."
+            echo "::error::oci-references.json lists no packages; nothing can be verified."
             exit 1
           fi
 
-          owner="${GITHUB_REPOSITORY%%/*}"
-          owner_type="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.owner.type')"
-          base="/user/packages/container"
-          if [ "$owner_type" = "Organization" ]; then
-            base="/orgs/$owner/packages/container"
-          fi
-          # The owner is already a path segment in $base, so the package name is the repository
-          # minus the owner. GHCR lowercases the owner and repository in the package name.
-          owner_lower="${owner,,}"
-          changed=0
-          refused=0
+          verified=0
+          not_public=0
           # Process substitution keeps the counters in this shell; a pipeline would run the loop in
-          # a subshell and lose them.
-          while read -r repository; do
-            package="${repository#ghcr.io/$owner_lower/}"
-            encoded="${package//\//%2F}"
-            if gh api --method PATCH "$base/$encoded" -f visibility=public >/dev/null; then
-              echo "Set $package to public"
-              changed=$((changed + 1))
-            else
-              echo "::warning::Could not set visibility for $package; make it public once in the package settings."
-              refused=$((refused + 1))
-            fi
-          done < <(jq -r '.Packages[].Repository' ./oci-references.json | sort -u)
+          # a subshell and lose them. `tr -d '\r'` is a no-op on the Linux runners, but jq on Windows
+          # writes CRLF, and a trailing carriage return on the digest makes curl reject the URL as
+          # malformed - so strip it to keep the step runnable locally.
+          while IFS='|' read -r repository digest; do
+            # Repository is the fully qualified "<registry>/<path>" from oci-references.json.
+            [[ "$repository" =~ ^([^/]+)/(.+)$ ]] || continue
+            registry="${BASH_REMATCH[1]}"
+            path="${BASH_REMATCH[2]}"
 
-          # Deliberately not an error: a package that is already public is still fine, and the
-          # anonymous install check below is the authoritative arbiter.
-          echo "Visibility: $changed set to public, $refused left unchanged (of $total)."
+            # Fetching a pull token anonymously is the first thing a client does. GHCR answers 403
+            # when the package is not anonymously readable, which is exactly the private case.
+            if ! token="$(curl -fsS --max-time 30 \
+              "https://$registry/token?service=$registry&scope=repository:$path:pull" \
+              | jq -r '.token // empty')" || [ -z "$token" ]; then
+              echo "::warning::$repository is not anonymously readable; set its visibility to Public (Package settings -> Danger Zone -> Change visibility)."
+              not_public=$((not_public + 1))
+              continue
+            fi
+
+            status="$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $token" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+              "https://$registry/v2/$path/manifests/$digest")"
+            if [ "$status" = "200" ]; then
+              verified=$((verified + 1))
+            else
+              echo "::warning::$repository manifest probe returned $status for $digest."
+              not_public=$((not_public + 1))
+            fi
+          done < <(jq -r '.Packages[] | "\(.Repository)|\(.Digest)"' ./oci-references.json | tr -d '\r' | sort -u)
+
+          if [ "$not_public" -gt 0 ]; then
+            echo "::warning::$not_public of $total package(s) are not publicly pullable. Anonymous installs fail until each is switched to Public in its Package settings; GitHub offers no API for this."
+          fi
+          echo "Anonymous pull probe: $verified of $total package(s) verified, $not_public not pullable."
 
       - name: Generate static registry catalog
         run: |
