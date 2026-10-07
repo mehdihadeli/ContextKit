@@ -203,7 +203,6 @@ public sealed class RegistryBuildAllIntegrationTests : IDisposable
         return new RegistryApplication(
             provider.GetRequiredService<IDocumentPackageBuilder>(),
             NullLoggerFactory.Instance,
-            new RegistryPublisher(new HttpClient()),
             provider.GetRequiredService<IHttpClientFactory>()
         );
     }

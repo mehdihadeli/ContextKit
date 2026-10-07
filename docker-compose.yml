@@ -1,61 +1,4 @@
 services:
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-groundkit-packages}
-    entrypoint: ["/bin/sh", "-c"]
-    command: >-
-      "mc alias set local http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY
-      && mc mb --ignore-existing local/$$MINIO_BUCKET"
-
-  registry-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
-    environment:
-      ASPNETCORE_URLS: http://+:8080
-      REGISTRY_DATABASE_PATH: /data/registry.db
-      REGISTRY_PUBLISH_KEY: ${REGISTRY_PUBLISH_KEY:?Set REGISTRY_PUBLISH_KEY in .env}
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-groundkit-packages}
-    ports:
-      - "8080:8080"
-    volumes:
-      - registry-data:/data
-    healthcheck:
-      test:
-        ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   mcp:
     build:
       context: .
@@ -79,6 +22,4 @@ services:
       - mcp-data:/data
 
 volumes:
-  minio-data:
-  registry-data:
   mcp-data:

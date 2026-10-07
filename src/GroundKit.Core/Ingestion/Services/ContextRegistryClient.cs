@@ -2,10 +2,12 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using GroundKit.Core.Abstractions;
 using GroundKit.Core.Contracts;
+using GroundKit.Oci;
 
 namespace GroundKit.Ingestion.Services;
 
-public sealed class ContextRegistryClient(HttpClient httpClient) : IContextRegistryClient
+public sealed class ContextRegistryClient(HttpClient httpClient, IHttpClientFactory? httpClientFactory = null)
+    : IContextRegistryClient
 {
     private const string DefaultRegistryUrl =
         "https://mehdihadeli.github.io/groundkit/registry/index.json";
@@ -115,15 +117,38 @@ public sealed class ContextRegistryClient(HttpClient httpClient) : IContextRegis
                 || string.IsNullOrWhiteSpace(entry.Name) || string.IsNullOrWhiteSpace(entry.Version)
                 || entry.Size <= 0 || entry.Sha256 is null || entry.Sha256.Length != 64
                 || !entry.Sha256.All(Uri.IsHexDigit)
-                || !Uri.TryCreate(entry.DownloadUrl, UriKind.Absolute, out var downloadUri)
-                || downloadUri.Scheme != Uri.UriSchemeHttps
-                || !string.IsNullOrEmpty(downloadUri.UserInfo)
+                || !TryResolveDownload(entry, out _)
                 || !identities.Add((entry.Registry, entry.Name, entry.Version)))
             {
                 throw new InvalidDataException("Registry catalog contains an invalid or duplicate package.");
             }
         }
         return catalog;
+    }
+
+    /// <summary>
+    /// A package is addressed either by a direct HTTPS URL or by an OCI reference. Both forms are
+    /// validated before anything is downloaded.
+    /// </summary>
+    private static bool TryResolveDownload(RegistryCatalogEntry entry, out OciReference? ociReference)
+    {
+        ociReference = null;
+        if (!string.IsNullOrWhiteSpace(entry.OciReference) && OciReference.IsOci(entry.OciReference))
+        {
+            try
+            {
+                ociReference = OciReference.Parse(entry.OciReference);
+                return true;
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+        }
+
+        return Uri.TryCreate(entry.DownloadUrl, UriKind.Absolute, out var downloadUri)
+            && downloadUri.Scheme == Uri.UriSchemeHttps
+            && string.IsNullOrEmpty(downloadUri.UserInfo);
     }
 
     private async Task<RegistryCatalogEntry> FindCatalogEntryAsync(
@@ -142,34 +167,16 @@ public sealed class ContextRegistryClient(HttpClient httpClient) : IContextRegis
         var temporaryPath = destinationPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            using var response = await httpClient.GetAsync(entry.DownloadUrl,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            await EnsureSuccessAsync(response, cancellationToken);
-            if (response.Content.Headers.ContentLength is { } length && length != entry.Size)
+            if (TryResolveDownload(entry, out var ociReference) && ociReference is not null)
             {
-                throw new InvalidDataException("Registry package size does not match the catalog.");
+                await DownloadOciEntryAsync(ociReference, entry, temporaryPath, cancellationToken);
             }
-            await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
-            await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+            else
             {
-                var buffer = new byte[81920];
-                int read;
-                while ((read = await input.ReadAsync(buffer, cancellationToken)) != 0)
-                {
-                    if (output.Length + read > entry.Size)
-                    {
-                        throw new InvalidDataException("Registry package exceeds the catalog size.");
-                    }
-                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-                }
-                output.Position = 0;
-                var hash = await SHA256.HashDataAsync(output, cancellationToken);
-                if (output.Length != entry.Size
-                    || !CryptographicOperations.FixedTimeEquals(hash, Convert.FromHexString(entry.Sha256)))
-                {
-                    throw new InvalidDataException("Registry package checksum or size does not match the catalog.");
-                }
+                await DownloadHttpEntryAsync(entry, temporaryPath, cancellationToken);
             }
+
+            await VerifyAsync(temporaryPath, entry, cancellationToken);
             File.Move(temporaryPath, destinationPath, overwrite: true);
         }
         finally
@@ -178,6 +185,89 @@ public sealed class ContextRegistryClient(HttpClient httpClient) : IContextRegis
             {
                 File.Delete(temporaryPath);
             }
+        }
+    }
+
+    private async Task DownloadOciEntryAsync(
+        OciReference reference,
+        RegistryCatalogEntry entry,
+        string destinationPath,
+        CancellationToken cancellationToken
+    )
+    {
+        var client = CreateOciClient(reference);
+        var layer = await client.ResolveLayerAsync(
+            reference.Repository,
+            reference.Reference,
+            cancellationToken
+        );
+        if (layer.Size != entry.Size)
+        {
+            throw new InvalidDataException(
+                $"OCI artifact '{reference}' size does not match the catalog ({layer.Size} != {entry.Size})."
+            );
+        }
+
+        await client.DownloadBlobAsync(
+            reference.Repository,
+            layer.Digest,
+            destinationPath,
+            entry.Size,
+            cancellationToken
+        );
+    }
+
+    private OciRegistryClient CreateOciClient(OciReference reference)
+    {
+        var client =
+            httpClientFactory?.CreateClient("groundkit-oci")
+            ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        client.BaseAddress = new Uri($"https://{reference.Host}/");
+        client.Timeout = TimeSpan.FromMinutes(10);
+        return new OciRegistryClient(client, OciCredential.FromEnvironment(reference.Host));
+    }
+
+    private async Task DownloadHttpEntryAsync(
+        RegistryCatalogEntry entry,
+        string destinationPath,
+        CancellationToken cancellationToken
+    )
+    {
+        using var response = await httpClient.GetAsync(entry.DownloadUrl,
+            HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        if (response.Content.Headers.ContentLength is { } length && length != entry.Size)
+        {
+            throw new InvalidDataException("Registry package size does not match the catalog.");
+        }
+
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var output = new FileStream(destinationPath, FileMode.CreateNew,
+            FileAccess.ReadWrite, FileShare.None);
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await input.ReadAsync(buffer, cancellationToken)) != 0)
+        {
+            if (output.Length + read > entry.Size)
+            {
+                throw new InvalidDataException("Registry package exceeds the catalog size.");
+            }
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+    }
+
+    private static async Task VerifyAsync(
+        string path,
+        RegistryCatalogEntry entry,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        if (stream.Length != entry.Size
+            || !CryptographicOperations.FixedTimeEquals(hash, Convert.FromHexString(entry.Sha256)))
+        {
+            throw new InvalidDataException("Registry package checksum or size does not match the catalog.");
         }
     }
 

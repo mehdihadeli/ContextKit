@@ -91,19 +91,20 @@ library; there is no separate CLI installation.
 | `groundkit registry validate` | `v`, `val` | Validate definition syntax and identities. |
 | `groundkit registry build <name> [version]` | `b` | Build a definition into a `.db` artifact. |
 | `groundkit registry build-all` | `ba` | Build every definition and declared version. |
-| `groundkit registry publish <name> [version]` | `p`, `pub` | Build and upload a package to a compatible API, skipping an existing version. |
-| `groundkit registry publish-all` | `pa` | Build and upload all definitions, continuing after individual failures. |
+| `groundkit registry push-oci` | `po` | Push built packages to an OCI registry and write the digest-pinned reference map. |
 | `groundkit registry bundle` | `bd`, `bun` | Create a ZIP or tar.gz archive of built packages and metadata. |
 | `groundkit registry import-bundle <path>` | `ib` | Extract a bundle into an artifact directory; it does not install packages. |
 | `groundkit registry catalog-index` | None | Generate static `index.json` and content-addressed Release assets from built packages. |
 
 | Option | Alias | Applies to | Default |
 | --- | --- | --- | --- |
-| `--dir <path>` | `-d` | List, validate, build, publish, and catalog-index commands | `registry` |
-| `--output <path>` | `-o` | Build, publish, bundle, import-bundle, and catalog-index commands | `./dist-packages` |
+| `--dir <path>` | `-d` | List, validate, build, push-oci, and catalog-index commands | `registry` |
+| `--output <path>` | `-o` | Build, push-oci, bundle, import-bundle, and catalog-index commands | `./dist-packages` |
 | `--format <format>` | `-f` | `bundle` | `zip`; also accepts `tar.gz` and `tgz` |
 | `--destination <path>` | `-t` | `bundle`, `catalog-index` | Bundle archive path; catalog directory defaults to `./dist-catalog`. |
-| `--base-url <URL>` | None | `catalog-index` | Required HTTPS Release asset directory URL. |
+| `--oci-repository <host/path>` | None | `push-oci`, `catalog-index` | Target OCI repository, for example `ghcr.io/owner/groundkit`. |
+| `--oci-references <path>` | None | `push-oci`, `catalog-index` | Digest-pinned reference map; defaults to `oci-references.json`. |
+| `--base-url <URL>` | None | `catalog-index` | Required HTTPS asset directory URL when no OCI target is supplied. |
 
 See the [registry tooling README](../GroundKit.Registry/README.md) for YAML,
 publishing configuration, and contributor workflows.
@@ -137,15 +138,15 @@ and HTTPS package URLs. Direct package files do not require a registry API.
 | `RegistryUrl` in `.groundkit/config.json` | Consumer commands | API base URL or full static `index.json` URL; defaults to the public GroundKit Pages catalog. |
 | `GROUNDKIT_REGISTRY_URL` | Consumer commands | Override the project registry address for the current environment. |
 | `--registry-url <URL>` | `search-packages`, `download-package`, `install` | Override the registry for one invocation; highest priority. |
-| `REGISTRY_SERVER_URL` | `registry publish` and `publish-all` | Publishing API address; defaults to `http://localhost:8080`. |
-| `REGISTRY_PUBLISH_KEY` | Publishing commands | Upload bearer token; supply securely, not in committed configuration. |
+| `GROUNDKIT_OCI_USERNAME` | `registry push-oci` | OCI registry username; falls back to `GITHUB_ACTOR`. |
+| `GROUNDKIT_OCI_TOKEN` | `registry push-oci` | OCI registry token or password; falls back to `GITHUB_TOKEN`, then the Docker credential file for the target host; never commit it. |
 
 ```powershell
 $env:GROUNDKIT_REGISTRY_URL = "http://localhost:8080"
 groundkit search-packages npm react
 ```
 
-For a one-off self-hosted or Pages catalog request, use the command option:
+For a one-off catalog request, use the command option:
 
 ```powershell
 groundkit search-packages npm react --registry-url https://registry.example.com
@@ -155,9 +156,9 @@ groundkit install npm/react --registry-url https://OWNER.github.io/REPOSITORY/re
 Precedence is `--registry-url`, `GROUNDKIT_REGISTRY_URL`, project
 `RegistryUrl`, then the public Pages catalog.
 
-The registry API is a separate application, `GroundKit.Registry.Server`. The CLI
-does not start it and does not reference its project. See the
-[server README](../GroundKit.Registry.Server/README.md) for self-hosting.
+Packages are published as OCI artifacts. The CLI never runs a registry server;
+it only reads a catalog and pulls digests. See the
+[registry tooling README](../GroundKit.Registry/README.md) for the publishing setup.
 
 For Releases + Pages, configure the full catalog URL, not just the Pages site:
 
@@ -169,8 +170,8 @@ groundkit install npm/react
 
 Replace `OWNER` and `REPOSITORY` with the deployed site, or use the catalog URL
 reported by the Pages workflow. Static downloads verify byte size and SHA-256
-before import. Direct Release `.db` URLs also work, but do not use catalog
-checksum verification. API URLs continue to use the self-hosted API protocol.
+before import. Direct `.db` URLs also work, but do not use catalog checksum
+verification.
 
 See the [main guide](../../README.md#cli-reference) for more examples and the
 [community registry guide](../../registry/README.md) for definition contributions.

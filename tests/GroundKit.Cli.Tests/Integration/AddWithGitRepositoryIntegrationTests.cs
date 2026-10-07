@@ -32,10 +32,13 @@ public sealed class AddWithGitRepositoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Tagged_Git_Repository_And_Remove_Temporary_Clone()
     {
+        TestNetwork.RequireUrl(RepositoryUrl);
+
         var cloneDirectoriesBefore = SnapshotTemporaryCloneDirectories();
         var application = CreateApplication("tagged");
 
         var exitCode = await application.RunAsync(["add", RepositoryUrl, "--tag", RepositoryTag]);
+        exitCode.ShouldBe(0, $"cloning '{RepositoryUrl}' at tag '{RepositoryTag}' should succeed.");
 
         var packageStore = CreatePackageStore("tagged");
         var package = (
@@ -46,7 +49,6 @@ public sealed class AddWithGitRepositoryIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         source.ShouldNotBeNull();
         source.Kind.ShouldBe(SourceKind.GitRepository);
         source.Location.ShouldBe(RepositoryUrl);
@@ -60,10 +62,13 @@ public sealed class AddWithGitRepositoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_GitHub_Tree_Branch_And_Store_Requested_Branch()
     {
+        TestNetwork.RequireUrl(RepositoryUrl);
+
         var cloneDirectoriesBefore = SnapshotTemporaryCloneDirectories();
         var application = CreateApplication("branch");
 
         var exitCode = await application.RunAsync(["add", $"{RepositoryUrl}/tree/main"]);
+        exitCode.ShouldBe(0, $"cloning '{RepositoryUrl}' at branch 'main' should succeed.");
 
         var packageStore = CreatePackageStore("branch");
         var package = (
@@ -74,7 +79,6 @@ public sealed class AddWithGitRepositoryIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         source.ShouldNotBeNull();
         source.Location.ShouldBe(RepositoryUrl);
         source.Tag.ShouldBe("main");
@@ -87,11 +91,14 @@ public sealed class AddWithGitRepositoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Git_Repository_With_Docs_Path_And_Store_Metadata()
     {
+        TestNetwork.RequireUrl(RepositoryUrl);
+
         var application = CreateApplication("docs-path");
 
         var exitCode = await application.RunAsync(
             ["add", RepositoryUrl, "--tag", RepositoryTag, "--docs-path", "skills"]
         );
+        exitCode.ShouldBe(0, $"cloning '{RepositoryUrl}' with a docs path should succeed.");
 
         var packageStore = CreatePackageStore("docs-path");
         var package = (
@@ -102,7 +109,6 @@ public sealed class AddWithGitRepositoryIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         source.ShouldNotBeNull();
         source.DocsPath.ShouldBe("skills");
         source.Tag.ShouldBe(RepositoryTag);

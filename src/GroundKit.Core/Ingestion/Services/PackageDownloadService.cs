@@ -58,24 +58,15 @@ public sealed class PackageDownloadService(
             return local.PackagePath;
         }
 
+        IReadOnlyList<RegistryPackage> matches;
         try
         {
-            var matches = await registryClient.SearchAsync(
+            matches = await registryClient.SearchAsync(
                 registry,
                 name,
                 version,
                 cancellationToken
             );
-            var match = matches.FirstOrDefault();
-            if (match is not null)
-            {
-                return await InstallRegistryPackageAsync(
-                    match.Registry,
-                    match.Name,
-                    match.Version,
-                    cancellationToken
-                );
-            }
         }
         catch (Exception exception)
             when (exception is HttpRequestException or TaskCanceledException)
@@ -84,6 +75,21 @@ public sealed class PackageDownloadService(
                 exception,
                 "Registry unavailable for {PackageReference}; falling back to local build.",
                 packageOrSource
+            );
+            return await BuildLocallyAsync(name, version, cancellationToken);
+        }
+
+        var match = matches.FirstOrDefault();
+        if (match is not null)
+        {
+            // Deliberately outside the fallback: a registry that answers but cannot serve the
+            // artifact (missing manifest, size or checksum mismatch) is a broken catalog entry, and
+            // reporting it as a failed local build would hide the real cause.
+            return await InstallRegistryPackageAsync(
+                match.Registry,
+                match.Name,
+                match.Version,
+                cancellationToken
             );
         }
 

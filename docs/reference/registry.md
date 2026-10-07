@@ -14,11 +14,41 @@ groundkit install npm/react
 ```
 
 Replace the example with the URL reported by the Pages deployment. Catalog
-schema version `1` lists identities, versions, HTTPS asset URLs, byte sizes,
-and SHA-256 hashes. Downloads verify size and hash before local import.
-The registry workflow publishes snapshot Release assets; the docs workflow
-deploys their catalog alongside this site. Availability requires successful CI
-and Pages setup. An API base URL instead uses the routes below.
+schema version `1` lists identities, versions, HTTPS manifest or asset URLs,
+byte sizes, SHA-256 hashes, and an optional `ociReference`. Downloads verify
+size and hash before local import.
+
+Packages for the default catalog are published as content-addressed OCI
+artifacts in the GitHub Container Registry, so `install` resolves the artifact
+by manifest digest, downloads its single layer, and verifies SHA-256 against the
+catalog. The registry workflow also generates the catalog, ships it as a workflow
+artifact, and the docs workflow deploys it alongside this site. No `.db` files
+are attached to GitHub Releases. Availability requires successful CI and Pages
+setup, plus a one-time public visibility flip per GHCR package. An API base URL
+instead uses the routes below.
+
+## OCI artifacts
+
+Publishing to an OCI registry uses the OCI Distribution Specification directly:
+
+```text
+GET  /v2/<repository>/manifests/<tag|digest>
+GET  /v2/<repository>/blobs/<digest>
+POST /v2/<repository>/blobs/uploads/
+PUT  /v2/<repository>/blobs/uploads/<id>?digest=<digest>
+PUT  /v2/<repository>/manifests/<tag>
+```
+
+Each package is a single-layer artifact whose layer media type is
+`application/vnd.groundkit.package.v1.db` and whose layer is the SQLite package
+file. Anonymous pulls work for public packages; authenticated pushes read
+credentials from `GROUNDKIT_OCI_USERNAME` and `GROUNDKIT_OCI_TOKEN`, falling back
+to `GITHUB_ACTOR` and `GITHUB_TOKEN`, and finally to the host's entry in the
+Docker credential file (`$DOCKER_CONFIG/config.json`, default
+`~/.docker/config.json`) — the file `docker/login-action` writes, so a workflow
+logs in with the standard action instead of exporting a token. Credentials are
+matched by registry host, so a file holding several registries never sends one
+host's token to another.
 
 ## Search
 
@@ -44,48 +74,16 @@ GET /packages/npm/react/19.1.0
 
 Returns package identity and optional source commit information.
 
-The server may be local, internal, or hosted. Configure its base URL with `GROUNDKIT_REGISTRY_URL`.
+Consumers only need read access to the catalog. Configure its URL with `GROUNDKIT_REGISTRY_URL`.
 
-## Local server
+## Static catalog
 
-The registry server is an optional self-hosted Docker deployment. It stores
-metadata in SQLite and package files in MinIO or another S3-compatible store.
-It is not required for local CLI or MCP queries.
-
-From a cloned repository, create the environment file and replace both example
-secrets before starting the services:
-
-```bash
-cp .env.example .env
-```
-
-Start the registry API and its MinIO dependencies:
-
-```bash
-docker compose up --build -d registry-api
-```
-
-Check the API:
-
-```bash
-curl http://localhost:8080/health
-```
-
-The API listens on `http://localhost:8080`. MinIO stores package files on port
-`9000` and its administration console is available on port `9001`.
-
-Publish packages from the CLI by configuring the API address and upload token:
+Packages live in an OCI registry. The catalog is a static `index.json` that maps
+each package to an OCI manifest digest, its byte size, and its SHA-256. There is
+no server to run and no credential needed to read.
 
 ```powershell
-$env:REGISTRY_SERVER_URL = "http://localhost:8080"
-$env:REGISTRY_PUBLISH_KEY = "the-value-from-.env"
-groundkit registry publish-all --dir registry --output ./dist-packages
-```
-
-Configure consumers with the same API address:
-
-```powershell
-$env:GROUNDKIT_REGISTRY_URL = "http://localhost:8080"
+$env:GROUNDKIT_REGISTRY_URL = "https://OWNER.github.io/REPOSITORY/registry/index.json"
 groundkit search-packages npm react
 groundkit install npm/react
 ```
@@ -94,10 +92,17 @@ For a one-off consumer request, use `--registry-url` instead of setting the
 environment variable:
 
 ```powershell
-groundkit search-packages npm react --registry-url http://localhost:8080
+groundkit search-packages npm react --registry-url https://registry.example.com/registry/index.json
 ```
 
-The Compose volumes `registry-data` and `minio-data` contain the registry
-state and package files. Back up both volumes. For production, expose only the
-registry API through HTTPS, keep MinIO private, replace development credentials,
-and do not commit `.env` or publish tokens.
+Publishing is a maintainer operation and needs write credentials for the OCI
+registry:
+
+```powershell
+$env:GROUNDKIT_OCI_USERNAME = "<github-user>"
+$env:GROUNDKIT_OCI_TOKEN = "<token-with-write-packages>"
+groundkit registry push-oci --dir registry --output ./dist-packages `
+  --oci-repository ghcr.io/OWNER/REPOSITORY --oci-references ./oci-references.json
+```
+
+Consumers verify the manifest digest, blob size, and SHA-256 before import.

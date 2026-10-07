@@ -28,5 +28,6 @@ public sealed record RegistryCatalogEntry(
     string DownloadUrl,
     long Size,
     string Sha256,
-    string? SourceCommit = null
+    string? SourceCommit = null,
+    string? OciReference = null
 );

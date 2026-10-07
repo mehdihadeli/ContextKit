@@ -2,13 +2,16 @@
 
 Registry definitions describe where documentation comes from and how to build a GroundKit package. Each YAML file defines an unversioned source or one or more versioned sources.
 
-GroundKit consumes packages through a compatible HTTP API, a static catalog, or
-direct package URLs. The [Registry Update workflow](../.github/workflows/registry-update.yml)
-validates definitions, builds packages, and publishes snapshot Releases on `main`.
-The docs workflow deploys the newest catalog to `registry/index.json` alongside
-the Pages site. Actions artifacts remain available for temporary transfers.
-Public availability requires successful CI and Pages configuration. Optional
-self-hosted API publishing is also supported by the maintainer commands.
+GroundKit consumes packages through a static catalog, a direct package URL, or a
+local file. The [Registry Update workflow](../.github/workflows/registry-update.yml)
+validates definitions, builds packages, and publishes every package as a
+content-addressed OCI artifact in the GitHub Container Registry (`ghcr.io`). The
+workflow then generates the static catalog and uploads it as a workflow
+artifact; the docs workflow copies the newest artifact to
+`registry/index.json` alongside the Pages site. Packages are therefore never
+attached to GitHub Releases, so the release list stays clean and installs pull
+small, verifiable blobs instead of release assets. Public availability requires
+successful CI and Pages configuration.
 
 ## Layout
 
@@ -153,7 +156,7 @@ versions:
       docs_path: docs
 ```
 
-Automatic discovery of all upstream releases is not implemented. List exact versions when reproducibility is required. The maintainer CLI can build them and publish to a configured GroundKit API.
+Automatic discovery of all upstream releases is not implemented. List exact versions when reproducibility is required. The maintainer CLI builds them and publishes them to an OCI registry.
 
 ## Add a definition
 
@@ -178,6 +181,76 @@ and Pages deployment should run only from trusted, merged definitions. Adding a
 definition does not automatically install its package for consumers.
 
 A registry builder should reject malformed definitions, missing documentation roots, and definitions that produce empty or suspiciously small packages. CI currently validates required fields and builds every definition; package health thresholds remain future work.
+
+## Publishing packages
+
+Maintainers publish in two steps: push every built package as an OCI artifact,
+then generate a catalog that addresses those artifacts by digest.
+
+```bash
+# 1. Build, then push. Writes the digest-pinned reference map consumed in step 2.
+groundkit registry build-all --dir registry --output ./dist-packages
+GROUNDKIT_OCI_USERNAME=<user> GROUNDKIT_OCI_TOKEN=<token> \
+  groundkit registry push-oci --dir registry --output ./dist-packages \
+  --oci-repository ghcr.io/<owner>/<repo> \
+  --oci-references ./oci-references.json
+
+# 2. Generate the static catalog that consumers read.
+groundkit registry catalog-index --dir registry --output ./dist-packages \
+  --destination ./dist-catalog --oci-references ./oci-references.json
+```
+
+`GROUNDKIT_OCI_TOKEN` falls back to `GITHUB_TOKEN`, and `GROUNDKIT_OCI_USERNAME`
+to `GITHUB_ACTOR`. When neither is set, credentials are read from the matching
+host in the Docker credential file (`~/.docker/config.json`), so CI can log in
+with `docker/login-action` instead of exporting a token. Auth is only needed to
+push; pulls are anonymous because the catalog stores no credentials. Options:
+
+| Option | Purpose |
+| --- | --- |
+| `--oci-repository <host/path>` | Target registry, for example `ghcr.io/owner/groundkit`. Required. |
+| `--oci-references <path>` | Digest-pinned reference map. Written by `push-oci`, read by `catalog-index`. |
+| `--output <path>` | Directory holding the built `*.db` packages. |
+
+Two notes for container registries:
+
+- Image names must be single-segment and lowercase. A package is published as
+  `<path>/<registry>-<name>` with a tag from its version, so `npm/react@latest`
+  becomes `ghcr.io/<owner>/<repo>/npm-react:latest`.
+- GHCR creates packages private on first publish. Flip each once to public, or
+  let the Registry Update workflow's visibility step do it.
+
+`catalog-index` requires either `--oci-references` (or `--oci-repository` for
+tag-based references) or an explicit `--base-url` pointing at HTTPS-hosted
+assets. Supplying `--oci-references` switches the catalog to OCI mode: nothing
+is copied to disk, and a package missing from the map is a hard error, so a
+partially pushed release fails loudly instead of shipping a broken catalog.
+
+## Verify a published catalog
+
+The catalog is the consumer contract, so it is worth installing from it after
+publishing. Serve the generated catalog and install the smallest package through
+the real CLI:
+
+```bash
+(cd ./dist-catalog && python3 -m http.server 8123 --bind 127.0.0.1 &)
+groundkit install npm/react 18.0.0 --registry-url http://127.0.0.1:8123/index.json
+```
+
+CI does exactly this after pushing to GHCR. To run the same scenario as a test
+against a real registry:
+
+```bash
+GROUNDKIT_OCI_TESTS=1 \
+GROUNDKIT_OCI_TEST_REPOSITORY=ghcr.io/OWNER/groundkit-test \
+GROUNDKIT_OCI_USERNAME=OWNER \
+GROUNDKIT_OCI_TOKEN=<token with write:packages and delete:packages> \
+  dotnet test --project tests/GroundKit.Registry.Tests --filter-class \
+    "GroundKit.Registry.Tests.Integration.GhcrPublishIntegrationTests"
+```
+
+Each run publishes a uniquely versioned artifact, installs it back through
+`groundkit install`, and deletes the manifest again.
 
 ## Included definitions
 

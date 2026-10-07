@@ -2,7 +2,7 @@
 
 Packages are versioned evidence artifacts. Build or import the package that matches the dependency version used by the project; do not combine multiple versions in one lookup workflow without making that choice explicit.
 
-The repository also includes a declarative starter registry in `registry/`. Its YAML files describe source locations for the curated catalog. The current CLI still builds from a source URL or catalog entry; YAML discovery and registry publishing are future work.
+The repository also includes a declarative starter registry in `registry/`. Its YAML files describe source locations for the curated catalog. `groundkit registry` validates those files and builds packages from them; automatic upstream version discovery remains future work.
 
 ## Sources
 

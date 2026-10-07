@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export REGISTRY_PUBLISH_KEY=test
 cleanup() {
   docker compose down --volumes --remove-orphans
 }

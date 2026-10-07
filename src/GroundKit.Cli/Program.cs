@@ -20,13 +20,6 @@ builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogL
 builder.Logging.SetMinimumLevel(verbose ? LogLevel.Information : LogLevel.Error);
 builder.Services.AddGroundKitServices();
 builder.Services.AddSingleton<RegistryApplication>();
-builder.Services.AddHttpClient<RegistryPublisher>(client =>
-{
-    var baseUrl =
-        Environment.GetEnvironmentVariable("REGISTRY_SERVER_URL")?.TrimEnd('/')
-        ?? "http://localhost:8080";
-    client.BaseAddress = new Uri(baseUrl + "/");
-});
 builder.Services.AddSingleton<CliApplication>();
 
 var app = CliCommandAppFactory.Create(builder.Services);

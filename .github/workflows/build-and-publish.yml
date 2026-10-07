@@ -40,7 +40,7 @@ jobs:
         run: dotnet build GroundKit.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test GroundKit.slnx --configuration Release --no-build
+        run: dotnet test --solution GroundKit.slnx --configuration Release --no-build
 
       - name: Run Docker MCP smoke tests
         run: bash scripts/test-mcp-docker.sh

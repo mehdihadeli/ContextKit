@@ -645,71 +645,48 @@ headers; do not commit credentials to project configuration.
 ### Registry distribution flow
 
 `GroundKit.Registry` builds packages through the `groundkit registry` branch.
-`GroundKit.Registry.Server` is an optional, separately deployed API. The
-[Registry Update workflow](.github/workflows/registry-update.yml) currently
-creates package files and uploads Actions artifacts; it does not start or
-publish to a registry server.
+The [Registry Update workflow](.github/workflows/registry-update.yml) builds
+package files, pushes them to the GitHub Container Registry as content-addressed
+OCI artifacts, and uploads the generated catalog artifact that the docs workflow
+serves from Pages.
 
 ```mermaid
 flowchart TD
   definitions["registry/&lt;manager&gt;/*.yaml"] --> workflow["Registry Update workflow"]
   workflow --> tooling["groundkit registry<br/>GroundKit.Registry library"]
   tooling -->|validate and build-all| packages["dist-packages/*.db"]
-  packages --> artifacts["Actions artifacts<br/>14-day retention"]
-  artifacts -->|Download artifact, then import| cli["GroundKit.Cli<br/>groundkit"]
-  tooling -.->|Optional publish or publish-all| server["GroundKit.Registry.Server<br/>Self-hosted API"]
-  server -.->|Search metadata and download| cli
+  packages -->|push-oci| ghcr["GitHub Container Registry<br/>content-addressed OCI artifacts"]
+  packages -->|catalog-index --oci-references| catalog["index.json"]
+  catalog --> pages["Docs workflow deploys catalog<br/>to Pages"]
+  pages -->|Catalog discovery| cli["GroundKit.Cli<br/>groundkit"]
+  ghcr -->|Digest-pinned manifest and blob pull| cli
   cli -->|Install or import| local[("Local SQLite packages")]
   local --> queries["CLI queries and MCP<br/>No registry connection needed"]
 ```
 
-Solid arrows show the current artifact workflow. Dashed arrows show supported
-API publishing, which is not enabled in the current workflow. The API stores
-metadata in SQLite and package files in S3-compatible storage; it does not build
-documentation. Consumers install packages explicitly and then query them locally.
+The `push-oci` step stores each SQLite package as a single-layer OCI manifest
+addressed by digest, and the catalog records those digests. Consumers resolve a
+manifest, download one blob, verify size and SHA-256, and import. Consumers
+install packages explicitly and then query them locally.
 
 | Distribution target | Commands used by maintainers or CI | Availability |
 | --- | --- | --- |
-| Actions artifacts | `registry validate`, `registry build-all` | Current workflow; temporary file downloads, not a searchable API. |
+| OCI registry (GHCR) | `registry validate`, `registry build-all`, `registry push-oci` | Current workflow; digest-addressed packages pulled by the CLI. |
 | Offline bundles | `registry build-all`, `registry bundle`, `registry import-bundle` | Available locally; not included in the current workflow. |
-| Self-hosted API | `registry validate`, `registry publish` or `registry publish-all` | Supported commands and server; CI publishing is optional and not configured. |
-| Releases + Pages | `registry validate`, `registry build-all`, `registry catalog-index`, then GitHub upload and deployment steps | Implemented; requires successful CI and Pages configuration. |
+| Static catalog on Pages | `registry validate`, `registry build-all`, `registry push-oci`, `registry catalog-index`, then the docs deployment | Current workflow; requires successful CI and Pages configuration. |
 
-For API publishing, CI can replace `build-all` with `publish-all`, which builds
-and uploads missing versions. Configure a runner-reachable `REGISTRY_SERVER_URL`
-and a secret `REGISTRY_PUBLISH_KEY`. Do not publish from untrusted contributor PRs.
-For Releases + Pages, retain `build-all`; API `publish-all` is not a GitHub
-Release uploader. See the [maintainer flow guide](src/GroundKit.Registry/README.md#distribution-flow)
-for the commands and an optional API publishing step.
+Publishing runs only from trusted, merged definitions on the default branch, never
+from contributor PR jobs. See the [maintainer flow guide](src/GroundKit.Registry/README.md#distribution-flow)
+for the complete command sequence.
 
-### Registry API option
+### Catalog endpoint
 
-The HTTP registry is the native distribution option for GroundKit clients. A
-registry server provides searchable metadata and immutable SQLite artifacts:
+Consumers need only the catalog URL. The default is the public Pages catalog at
+`https://mehdihadeli.github.io/groundkit/registry/index.json`. The catalog maps
+each package to an OCI manifest digest, byte size, and SHA-256; there is no
+server to run and no credential needed to read.
 
-```http
-GET /search?registry=npm&name=react&version=19.1.0
-GET /packages/npm/react/19.1.0
-GET /packages/npm/react/19.1.0/download
-```
-
-Run the included local registry with Docker Compose:
-
-```bash
-cp .env.example .env
-# Set REGISTRY_PUBLISH_KEY in .env
-docker compose up --build registry-api
-```
-
-The API host is the separate `GroundKit.Registry.Server` project. Maintainer
-commands in `GroundKit.Registry` build and publish packages but do not host the
-API. For direct hosting, use
-`dotnet run --project src/GroundKit.Registry.Server -- --urls http://localhost:8080`;
-start the host directly, not through a registry maintainer command. See the
-[server README](src/GroundKit.Registry.Server/README.md) for configuration.
-
-The registry API listens on `http://localhost:8080`. Point GroundKit at another
-server with `.groundkit/config.json`:
+Point GroundKit at another catalog with `.groundkit/config.json`:
 
 ```json
 {
@@ -722,10 +699,9 @@ server with `.groundkit/config.json`:
 
 Without configuration, consumer commands use the public Pages catalog at
 `https://mehdihadeli.github.io/groundkit/registry/index.json`. Set
-`GROUNDKIT_REGISTRY_URL` or `RegistryUrl` to use another catalog or API. Use
+`GROUNDKIT_REGISTRY_URL` or `RegistryUrl` to use another catalog. Use
 `HttpHeaders` for private registry request headers, but keep secrets out of
-committed files. MinIO backs the included registry storage at
-`http://localhost:9001`; clients use the API address, not the MinIO address.
+committed files.
 
 ### Bundle option for offline or bulk transfer
 
@@ -749,8 +725,8 @@ groundkit list
 ```
 
 The bundle is a distribution artifact, not a live registry. Importing its `.db`
-files enables local queries, not `search-packages`. Registry search requires
-a compatible API or a configured static catalog.
+files enables local queries, not `search-packages`. Registry search requires a
+configured catalog.
 
 ### GitHub Actions artifact option
 
@@ -771,28 +747,29 @@ GitHub Actions artifacts are suitable for CI handoff and short-lived builds.
 The workflow currently retains them for 14 days, so use a release asset, bundle
 archive, or HTTP registry for durable distribution.
 
-### GitHub Releases + Pages
+### GitHub Container Registry + Pages
 
 The [Registry Update workflow](.github/workflows/registry-update.yml) builds
-packages and generates a catalog, then publishes a snapshot Release on `main`.
-The [docs workflow](.github/workflows/deploy-docs.yml) deploys that catalog
-alongside the existing Pages site after a successful registry run. Source support
-is implemented; a public endpoint exists only after both workflows succeed.
+packages, pushes them to GHCR, and generates a catalog. The
+[docs workflow](.github/workflows/deploy-docs.yml) deploys that catalog alongside
+the existing Pages site after a successful registry run. A public endpoint exists
+only after both workflows succeed.
 
 ```mermaid
 flowchart LR
-  build["CI builds .db packages"] --> catalog["catalog-index generates metadata and hashed assets"]
-  catalog --> assets["Publish snapshot Release"]
-  assets --> pages["Docs workflow deploys registry/index.json"]
-  pages --> client["CLI reads catalog and verifies Release downloads"]
+  build["CI builds .db packages"] --> push["push-oci publishes single-layer OCI manifests"]
+  build --> catalog["catalog-index generates digest-pinned index.json"]
+  push --> pages["Docs workflow deploys registry/index.json"]
+  catalog --> pages
+  pages --> client["CLI resolves manifest digest and verifies SHA-256"]
 ```
 
 | Component | Implementation |
 | --- | --- |
-| Catalog generation | `groundkit registry catalog-index` reads SQLite identity/version, matches definitions, and creates URLs, sizes, and SHA-256 entries. |
-| Release assets | Registry Update publishes `registry-<run-id>-<attempt>` snapshots, without overwriting earlier assets or marking snapshots as the latest CLI release. |
+| Catalog generation | `groundkit registry catalog-index --oci-references` reads SQLite identity/version, matches definitions, and records each OCI manifest URL, size, and SHA-256. |
+| Package storage | Each package is one OCI manifest whose single layer is the SQLite file, addressed by digest in GHCR. No GitHub Release is created. |
 | Pages catalog | Docs deployment preserves the newest published catalog at `registry/index.json`. |
-| Consumer verification | Existing `search-packages`, `download-package`, and `install` commands use static mode for a full `index.json` URL and verify downloads before import. |
+| Consumer verification | Existing `search-packages`, `download-package`, and `install` commands resolve the digest, download the blob, and verify size and SHA-256 before import. |
 
 Enable Pages with the GitHub Actions source and allow workflow Release writes.
 Enable release immutability for platform-enforced protection. Workflows must be
@@ -805,38 +782,11 @@ groundkit search-packages npm react
 groundkit install npm/react
 ```
 
-Replace the example URL with your deployment. No self-hosted server or new
-consumer commands are needed. A site root is not a catalog URL: include the full
-`registry/index.json` path. API base URLs continue to use the self-hosted protocol.
-Direct Release `.db` URLs also work, but bypass catalog checksum verification.
-See the [registry tooling README](src/GroundKit.Registry/README.md#public-distribution-status)
+Replace the example URL with your deployment. No new consumer commands are
+needed. A site root is not a catalog URL: include the full `registry/index.json`
+path. Direct `.db` URLs also work, but bypass catalog checksum verification. See
+the [registry tooling README](src/GroundKit.Registry/README.md#public-distribution-status)
 for catalog generation and publication details.
-
-### OCI option through GHCR
-
-OCI packages are an optional external distribution channel when teams already
-authenticate to GHCR. The current workflow does not push OCI artifacts, and
-GroundKit's registry client does not pull them directly. If maintainers publish
-packages with ORAS, users can pull the artifact and import its `.db` file:
-
-```bash
-oras login ghcr.io -u USERNAME --password-stdin
-oras pull ghcr.io/OWNER/groundkit-packages:react--19.1.0-<commit12>
-groundkit import ./react--19.1.0-<commit12>.db
-```
-
-The commands above illustrate a possible tag and filename convention, not an
-existing published artifact. Use the actual reference supplied by the maintainer.
-Suggested OCI artifact media types are:
-
-```text
-application/vnd.groundkit.package.v1+sqlite
-application/vnd.groundkit.package.v1
-```
-
-Use the HTTP registry API or a static catalog for named-package search and
-installation. Bundles, GitHub artifacts, and OCI provide external file-transfer
-options.
 
 ### Registry maintainer commands
 
@@ -851,26 +801,27 @@ Short aliases for the maintainer CLI:
 | `validate` | `v`, `val` | Local checks and the current CI workflow. |
 | `build` | `b` | Building one definition locally. |
 | `build-all` | `ba` | Bulk builds and the current CI workflow. |
-| `publish` | `p`, `pub` | Uploading one package to an optional self-hosted API. |
-| `publish-all` | `pa` | Bulk API publishing by maintainers or configured CI. |
+| `push-oci` | `po` | Publishing packages to an OCI registry such as GHCR. |
 | `bundle` | `bd`, `bun` | Offline or bulk artifact distribution. |
 | `import-bundle` | `ib` | Extracting bundles before importing individual packages. |
 | `catalog-index` | None | Generating catalog metadata and content-addressed Release asset copies. |
 
-| Option          | Short alias |
-| --------------- | ----------- |
-| `--dir`         | `-d`        |
-| `--output`      | `-o`        |
-| `--format`      | `-f`        |
-| `--destination` | `-t`        |
-| `--base-url`    | None        |
+| Option                      | Short alias |
+| --------------------------- | ----------- |
+| `--dir`                     | `-d`        |
+| `--output`                  | `-o`        |
+| `--format`                  | `-f`        |
+| `--destination`             | `-t`        |
+| `--oci-repository`          | None        |
+| `--oci-references`          | None        |
+| `--base-url`                | None        |
 
 ```bash
 groundkit registry list --dir registry
 groundkit registry validate --dir registry
 groundkit registry build react --dir registry --output ./dist-packages
-groundkit registry publish react --dir registry --output ./dist-packages
-groundkit registry publish-all --dir registry --output ./dist-packages
+groundkit registry push-oci --dir registry --output ./dist-packages \
+  --oci-repository ghcr.io/OWNER/REPOSITORY --oci-references ./oci-references.json
 ```
 
 Short-form example:
@@ -879,9 +830,12 @@ Short-form example:
 groundkit registry b react -d registry -o ./dist-packages
 ```
 
-Set `REGISTRY_SERVER_URL` and `REGISTRY_PUBLISH_KEY` when publishing to an
-HTTP registry. Publishing is for maintainers or CI; end users only need the
-registry URL and read access.
+Set `GROUNDKIT_OCI_USERNAME` and `GROUNDKIT_OCI_TOKEN` when publishing to an OCI
+registry; the token falls back to `GITHUB_TOKEN` and the username to
+`GITHUB_ACTOR`. When neither is set the client reads the target host's entry in
+the Docker credential file, so CI logs in with `docker/login-action` rather than
+exporting a token. Publishing is for maintainers or CI; end users only need the
+catalog URL and read access.
 
 ### Opt-in package policy
 

@@ -15,8 +15,7 @@ src/
 ├── GroundKit.Hosting/            # DI composition for executable hosts
 ├── GroundKit.Cli/                # User-facing command-line tool
 ├── GroundKit.Mcp/                # MCP stdio and HTTP adapter
-├── GroundKit.Registry/            # Registry maintenance and package tooling
-├── GroundKit.Registry.Server/     # Optional self-hosted HTTP registry
+├── GroundKit.Registry/          # Registry maintenance and package tooling
 └── GroundKit.ServiceDefaults/    # Host telemetry, health checks, and resilience
 ```
 

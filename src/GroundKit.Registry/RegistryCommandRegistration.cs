@@ -9,7 +9,7 @@ public static class RegistryCommandRegistration
         config.AddBranch<CommandSettings>("registry", registry =>
         {
             registry.AddCommand<CatalogIndexRegistryCommand>("catalog-index")
-                .WithDescription("Generate a static registry catalog and content-addressed Release assets.");
+                .WithDescription("Generate a static registry catalog from built packages, served from OCI artifacts or Release assets.");
             registry
                 .AddCommand<ListRegistryCommand>("list")
                 .WithAlias("l")
@@ -33,16 +33,19 @@ public static class RegistryCommandRegistration
                 .WithDescription("Build all registry definitions into package artifacts.")
                 .WithExample("registry", "ba", "-d", "registry", "-o", "./dist-packages");
             registry
-                .AddCommand<PublishRegistryCommand>("publish")
-                .WithAlias("p")
-                .WithAlias("pub")
-                .WithDescription("Publish one built package to a compatible registry API.")
-                .WithExample("registry", "p", "react", "-d", "registry", "-o", "./dist-packages");
-            registry
-                .AddCommand<PublishAllRegistryCommand>("publish-all")
-                .WithAlias("pa")
-                .WithDescription("Publish all definitions and continue past individual failures.")
-                .WithExample("registry", "pa", "-d", "registry", "-o", "./dist-packages");
+                .AddCommand<PushOciRegistryCommand>("push-oci")
+                .WithAlias("po")
+                .WithDescription("Push built packages to an OCI registry and record their digests.")
+                .WithExample(
+                    "registry",
+                    "po",
+                    "-o",
+                    "./dist-packages",
+                    "--oci-repository",
+                    "ghcr.io/owner/groundkit",
+                    "--oci-references",
+                    "oci-references.json"
+                );
             registry
                 .AddCommand<BundleRegistryCommand>("bundle")
                 .WithAlias("bd")

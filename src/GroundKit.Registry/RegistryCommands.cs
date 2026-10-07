@@ -108,61 +108,6 @@ public sealed class BuildAllRegistryCommand(RegistryApplication application)
     }
 }
 
-public sealed class PublishRegistryCommand(RegistryApplication application)
-    : Command<PublishRegistryCommand.Settings>
-{
-    public sealed class Settings : RegistryPathSettings
-    {
-        [CommandArgument(0, "<NAME>")]
-        public string Name { get; init; } = string.Empty;
-
-        [CommandArgument(1, "[VERSION]")]
-        public string? Version { get; init; }
-
-        [CommandOption("-o|--output")]
-        public string? Output { get; init; }
-    }
-
-    protected override int Execute(
-        CommandContext context,
-        Settings settings,
-        CancellationToken cancellationToken
-    )
-    {
-        var arguments = new List<string> { "publish", settings.Name };
-        if (!string.IsNullOrWhiteSpace(settings.Version))
-        {
-            arguments.Add(settings.Version);
-        }
-
-        RegistryCommandArguments.AddOption(arguments, "--dir", settings.DirectoryPath);
-        RegistryCommandArguments.AddOption(arguments, "--output", settings.Output);
-        return RegistryCommandArguments.Run(application, arguments);
-    }
-}
-
-public sealed class PublishAllRegistryCommand(RegistryApplication application)
-    : Command<PublishAllRegistryCommand.Settings>
-{
-    public sealed class Settings : RegistryPathSettings
-    {
-        [CommandOption("-o|--output")]
-        public string? Output { get; init; }
-    }
-
-    protected override int Execute(
-        CommandContext context,
-        Settings settings,
-        CancellationToken cancellationToken
-    )
-    {
-        var arguments = new List<string> { "publish-all" };
-        RegistryCommandArguments.AddOption(arguments, "--dir", settings.DirectoryPath);
-        RegistryCommandArguments.AddOption(arguments, "--output", settings.Output);
-        return RegistryCommandArguments.Run(application, arguments);
-    }
-}
-
 public sealed class BundleRegistryCommand(RegistryApplication application)
     : Command<BundleRegistryCommand.Settings>
 {
@@ -229,6 +174,12 @@ public sealed class CatalogIndexRegistryCommand(RegistryApplication application)
 
         [CommandOption("--base-url <URL>")]
         public string BaseUrl { get; init; } = string.Empty;
+
+        [CommandOption("--oci-repository <REPOSITORY>")]
+        public string? OciRepository { get; init; }
+
+        [CommandOption("--oci-references <PATH>")]
+        public string? OciReferences { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -238,6 +189,34 @@ public sealed class CatalogIndexRegistryCommand(RegistryApplication application)
         RegistryCommandArguments.AddOption(arguments, "--output", settings.Output);
         RegistryCommandArguments.AddOption(arguments, "--destination", settings.Destination);
         RegistryCommandArguments.AddOption(arguments, "--base-url", settings.BaseUrl);
+        RegistryCommandArguments.AddOption(arguments, "--oci-repository", settings.OciRepository);
+        RegistryCommandArguments.AddOption(arguments, "--oci-references", settings.OciReferences);
+        return RegistryCommandArguments.Run(application, arguments);
+    }
+}
+
+public sealed class PushOciRegistryCommand(RegistryApplication application)
+    : Command<PushOciRegistryCommand.Settings>
+{
+    public sealed class Settings : RegistryPathSettings
+    {
+        [CommandOption("-o|--output")]
+        public string? Output { get; init; }
+
+        [CommandOption("--oci-repository <REPOSITORY>")]
+        public string OciRepository { get; init; } = string.Empty;
+
+        [CommandOption("--oci-references <PATH>")]
+        public string? OciReferences { get; init; }
+    }
+
+    protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
+    {
+        var arguments = new List<string> { "push-oci" };
+        RegistryCommandArguments.AddOption(arguments, "--dir", settings.DirectoryPath);
+        RegistryCommandArguments.AddOption(arguments, "--output", settings.Output);
+        RegistryCommandArguments.AddOption(arguments, "--oci-repository", settings.OciRepository);
+        RegistryCommandArguments.AddOption(arguments, "--oci-references", settings.OciReferences);
         return RegistryCommandArguments.Run(application, arguments);
     }
 }
