@@ -19,6 +19,13 @@ public sealed class DocumentPackageBuilder(
 ) : IDocumentPackageBuilder
 {
     private readonly GroundKitOptions options = options ?? new();
+
+    /// <summary>
+    /// Upper bound for a single git network step (clone, sparse setup, checkout). A repository that
+    /// cannot be fetched inside this window is treated as unavailable rather than hanging a build.
+    /// </summary>
+    private static readonly TimeSpan GitStepTimeout = TimeSpan.FromMinutes(5);
+
     private static readonly string[] DefaultDocsFolders =
     [
         "docs",
@@ -707,71 +714,56 @@ public sealed class DocumentPackageBuilder(
 
         try
         {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments =
-                    string.IsNullOrWhiteSpace(source.Tag)
-                    && string.IsNullOrWhiteSpace(source.Branch)
-                        ? $"clone --progress --depth 1 --no-checkout \"{source.Location}\" \"{tempRoot}\""
-                        : $"clone --progress --depth 1 --no-checkout --branch \"{source.Tag ?? source.Branch}\" \"{source.Location}\" \"{tempRoot}\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
+            var docsPath = string.IsNullOrWhiteSpace(source.DocsPath) ? null : source.DocsPath;
 
-            using var process =
-                Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Failed to start git clone process.");
+            // Two flags keep large repositories inside the timeout budget:
+            //   --filter=blob:none  makes this a "blobless" partial clone. Only commits and trees
+            //                       are fetched up front; file contents arrive on demand.
+            //   --sparse            lets the checkout materialise one docs path instead of the
+            //                       whole tree.
+            // Together they turn a >5 minute full snapshot of a repository like angular (1,300
+            // tags, tens of thousands of files) into roughly twenty seconds, because only the
+            // documentation files are ever transferred. Servers that do not advertise the filter
+            // capability just warn and send everything, so this stays safe for local fixtures.
+            var cloneArguments =
+                string.IsNullOrWhiteSpace(source.Tag) && string.IsNullOrWhiteSpace(source.Branch)
+                    ? $"clone --progress --depth 1 --no-checkout --filter=blob:none --sparse \"{source.Location}\" \"{tempRoot}\""
+                    : $"clone --progress --depth 1 --no-checkout --filter=blob:none --sparse --branch \"{source.Tag ?? source.Branch}\" \"{source.Location}\" \"{tempRoot}\"";
 
-            using var cloneTimeout = CancellationTokenSource.CreateLinkedTokenSource(
+            await RunGitAsync(
+                cloneArguments,
+                GitStepTimeout,
+                $"Git clone timed out for '{source.Location}'.",
+                $"Git clone failed for '{source.Location}'",
+                failureHint: null,
                 cancellationToken
             );
-            cloneTimeout.CancelAfter(TimeSpan.FromMinutes(5));
 
-            try
-            {
-                await process.WaitForExitAsync(cloneTimeout.Token);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                process.Kill(entireProcessTree: true);
-                throw new TimeoutException($"Git clone timed out for '{source.Location}'.");
-            }
-            catch
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
+            // --no-cone keeps the pattern semantics simple: the path matches itself and, when it is
+            // a directory, everything beneath it. Cone mode would reject a docs path that names a
+            // single file. A definition without a docs path has to materialise the whole tree,
+            // which is what disabling sparse checkout does.
+            await RunGitAsync(
+                docsPath is null
+                    ? $"-C \"{tempRoot}\" sparse-checkout disable"
+                    : $"-C \"{tempRoot}\" sparse-checkout set --no-cone \"{docsPath}\"",
+                GitStepTimeout,
+                $"Git sparse checkout setup timed out for '{source.Location}'.",
+                $"Git sparse checkout setup failed for '{source.Location}'",
+                failureHint: null,
+                cancellationToken
+            );
 
-                throw;
-            }
-
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException(
-                    $"Git clone failed for '{source.Location}' with exit code {process.ExitCode}."
-                );
-            }
-
-            var checkout = new ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments =
-                    $"-C \"{tempRoot}\" checkout HEAD -- \"{source.DocsPath ?? "."}\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var checkoutProcess =
-                Process.Start(checkout)
-                ?? throw new InvalidOperationException("Failed to start git checkout process.");
-            await checkoutProcess.WaitForExitAsync(cancellationToken);
-            if (checkoutProcess.ExitCode != 0)
-            {
-                throw new InvalidOperationException(
-                    $"Git checkout of '{source.DocsPath ?? "."}' failed for '{source.Location}' with exit code {checkoutProcess.ExitCode}. Verify the configured docs path exists in the repository."
-                );
-            }
+            // On a blobless clone the checkout is what downloads the documentation blobs, so it
+            // needs its own bounded budget rather than waiting on the caller's token alone.
+            await RunGitAsync(
+                $"-C \"{tempRoot}\" checkout HEAD",
+                GitStepTimeout,
+                $"Git checkout of '{source.DocsPath ?? "."}' timed out for '{source.Location}'.",
+                $"Git checkout of '{source.DocsPath ?? "."}' failed for '{source.Location}'",
+                failureHint: "Verify the configured docs path exists in the repository.",
+                cancellationToken
+            );
 
             return tempRoot;
         }
@@ -780,6 +772,68 @@ public sealed class DocumentPackageBuilder(
             DeleteTemporaryDirectoryIfExists(tempRoot);
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Runs a git command that must finish inside <paramref name="timeout"/>, killing the whole
+    /// process tree on timeout so a stalled network fetch cannot leak a child behind. A caller
+    /// cancellation still propagates untouched.
+    /// </summary>
+    private static async Task RunGitAsync(
+        string arguments,
+        TimeSpan timeout,
+        string timeoutMessage,
+        string failureMessage,
+        string? failureHint,
+        CancellationToken cancellationToken
+    )
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = arguments,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        using var process =
+            Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start git process.");
+
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken
+        );
+        timeoutSource.CancelAfter(timeout);
+
+        try
+        {
+            await process.WaitForExitAsync(timeoutSource.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException(timeoutMessage);
+        }
+        catch
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            throw;
+        }
+
+        if (process.ExitCode != 0)
+        {
+            var message = $"{failureMessage} with exit code {process.ExitCode}.";
+            if (failureHint is not null)
+            {
+                message = $"{message} {failureHint}";
+            }
+
+            throw new InvalidOperationException(message);
         }
     }
 

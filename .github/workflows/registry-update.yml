@@ -18,7 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
-      contents: write
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -39,9 +40,29 @@ jobs:
 
       - name: Run tests
         env:
-          # Enables the tests that clone every checked-in upstream repository.
+          # Offline only. The live clone/publish checks get their own steps below, targeted with
+          # --filter-class so the slow ones run once instead of everywhere.
           GROUNDKIT_NETWORK_TESTS: "0"
         run: dotnet test --solution GroundKit.slnx --no-build --configuration Release
+
+      # The live registry checks run here rather than in build-and-publish so that a third party
+      # being down cannot fail a pull request. ttl.sh needs no credentials, so nothing has to be
+      # provisioned for these steps.
+      - name: Verify OCI publishing against a live registry
+        env:
+          GROUNDKIT_NETWORK_TESTS: "1"
+        run: |
+          dotnet test --project tests/GroundKit.Registry.Tests --no-build --configuration Release \
+            --filter-class "GroundKit.Registry.Tests.Integration.TtlShPublishIntegrationTests"
+
+      - name: Verify add against live sites
+        env:
+          GROUNDKIT_NETWORK_TESTS: "1"
+        run: |
+          dotnet test --project tests/GroundKit.Cli.Tests --no-build --configuration Release \
+            --filter-class "GroundKit.Tests.Integration.AddFromWebsiteIntegrationTests" \
+            --filter-class "GroundKit.Tests.Integration.AddWithGitRepositoryIntegrationTests" \
+            --filter-class "GroundKit.Tests.Integration.AddFromDirectoryIntegrationTests"
 
       - name: Validate and build registry definitions
         run: |
@@ -64,33 +85,88 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Generate static registry catalog and Release assets
+      - name: Log in to the GitHub Container Registry
+        # Writes ~/.docker/config.json, which the CLI reads for its OCI credentials.
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish packages to GitHub Container Registry
+        run: |
+          # GHCR rejects uppercase characters in the repository path.
+          oci_repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+            registry push-oci --dir registry --output ./dist-packages \
+            --oci-repository "$oci_repository" \
+            --oci-references ./oci-references.json
+          echo "::notice::Packages published to $oci_repository"
+
+      - name: Make registry packages publicly pullable
+        # GHCR creates packages private on first publish; installs are anonymous, so they must be
+        # public. Best effort, because the job token cannot always administer packages: every failure
+        # is reported as a warning so a leftover private package is visible in the run, and the
+        # anonymous install check below fails when one remains.
+        continue-on-error: true
         env:
-          REGISTRY_TAG: registry-${{ github.run_id }}-${{ github.run_attempt }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          owner="${GITHUB_REPOSITORY%%/*}"
+          owner_type="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.owner.type')"
+          base="/user/packages/container"
+          if [ "$owner_type" = "Organization" ]; then
+            base="/orgs/$owner/packages/container"
+          fi
+          # The owner is already a path segment in $base, so the package name is the repository
+          # minus the owner. GHCR lowercases the owner and repository in the package name.
+          owner_lower="${owner,,}"
+          jq -r '.packages[].repository' ./oci-references.json | sort -u | while read -r repository; do
+            package="${repository#ghcr.io/$owner_lower/}"
+            encoded="${package//\//%2F}"
+            if gh api --method PATCH "$base/$encoded" -f visibility=public >/dev/null; then
+              echo "Set $package to public"
+            else
+              echo "::warning::Could not set visibility for $package; make it public once in the package settings."
+            fi
+          done
+
+      - name: Generate static registry catalog
         run: |
           dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
             registry catalog-index --dir registry --output ./dist-packages \
             --destination ./dist-catalog \
-            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$REGISTRY_TAG/"
+            --oci-references ./oci-references.json
 
-      - name: Upload registry packages
+      - name: Verify published packages install like a consumer would
+        # The catalog is the consumer contract, so the real CLI installs from a local copy of it.
+        # This fails the run when a catalog points at an artifact a consumer cannot pull, which is
+        # otherwise only discoverable once the catalog has already been deployed.
+        # DOCKER_CONFIG points at an empty directory so the install runs anonymously, exactly like
+        # an end user. Without this the client would reuse the credentials the login step wrote and
+        # pass even when a package is still private in GHCR.
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/anonymous-docker-config
+        run: |
+          python3 -m http.server 8123 --bind 127.0.0.1 --directory ./dist-catalog >/dev/null 2>&1 &
+          catalog_url="http://127.0.0.1:8123/index.json"
+          for _ in $(seq 1 20); do
+            curl -fsS "$catalog_url" >/dev/null && break
+            sleep 1
+          done
+          # The smallest package keeps the check fast while still exercising the full pull path.
+          read -r reference version <<< "$(jq -r \
+            '[.packages[]] | sort_by(.size) | .[0] | "\(.registry)/\(.name) \(.version)"' \
+            ./dist-catalog/index.json)"
+          echo "Installing $reference $version from $catalog_url"
+          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+            install "$reference" "$version" --registry-url "$catalog_url"
+          echo "::notice::Verified $reference $version installs from the published catalog"
+
+      - name: Upload registry catalog
         uses: actions/upload-artifact@v7
         with:
-          name: groundkit-registry-${{ github.run_id }}
-          path: ./dist-packages/*.db
+          name: groundkit-registry-catalog
+          path: ./dist-catalog/index.json
           if-no-files-found: error
-          retention-days: 14
-
-      - name: Publish registry snapshot Release
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REGISTRY_TAG: registry-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          gh release create "$REGISTRY_TAG" --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" --draft --latest=false \
-            --title "Registry snapshot $REGISTRY_TAG" \
-            --notes "Documentation packages and catalog built from $GITHUB_SHA."
-          gh release upload "$REGISTRY_TAG" --repo "$GITHUB_REPOSITORY" \
-            ./dist-catalog/assets/*.db ./dist-catalog/index.json
-          gh release edit "$REGISTRY_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          retention-days: 90

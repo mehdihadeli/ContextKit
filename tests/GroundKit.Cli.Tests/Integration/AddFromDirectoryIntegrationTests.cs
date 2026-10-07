@@ -26,6 +26,23 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
         _repositoryPath = Path.Combine(_root, "skills");
         _packageRoot = Path.Combine(_root, "packages");
         Directory.CreateDirectory(_root);
+    }
+
+    /// <summary>Clones the sample repository the first time a test needs it.</summary>
+    /// <remarks>
+    /// The clone is deferred instead of done in the constructor so the network gate can report an
+    /// unreachable repository as a skip. Cloning up front fails during construction, before any test
+    /// body runs, which surfaces as a fixture error rather than a reason.
+    /// </remarks>
+    private void EnsureRepository()
+    {
+        if (Directory.Exists(_repositoryPath))
+        {
+            return;
+        }
+
+        TestNetwork.RequireUrl(RepositoryUrl);
+
         try
         {
             CloneRepository();
@@ -54,6 +71,8 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public void Should_Remove_Cloned_Repository_When_Disposed()
     {
+        EnsureRepository();
+
         Directory.Exists(_repositoryPath).ShouldBeTrue();
 
         Dispose();
@@ -65,9 +84,12 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Local_Repository_And_Auto_Detect_Docs_Folder()
     {
+        EnsureRepository();
+
         var application = CreateApplication("auto-detect");
 
         var exitCode = await application.RunAsync(["add", _repositoryPath]);
+        exitCode.ShouldBe(0, "adding the cloned repository should build a package.");
 
         var packageStore = CreatePackageStore("auto-detect");
         var package = (
@@ -78,7 +100,6 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         source.ShouldNotBeNull();
         source.Kind.ShouldBe(SourceKind.LocalDirectory);
         source.Location.ShouldBe(Path.GetFullPath(_repositoryPath));
@@ -90,9 +111,12 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Local_Repository_With_Explicit_Path()
     {
+        EnsureRepository();
+
         var application = CreateApplication("explicit-path");
 
         var exitCode = await application.RunAsync(["add", _repositoryPath, "--path", "docs"]);
+        exitCode.ShouldBe(0, "adding the cloned repository with an explicit docs path should succeed.");
 
         var packageStore = CreatePackageStore("explicit-path");
         var package = (
@@ -103,7 +127,6 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         source.ShouldNotBeNull();
         source.DocsPath.ShouldBe("docs");
         package.DocumentCount.ShouldBeGreaterThan(0);
@@ -114,6 +137,8 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Local_Repository_With_Custom_Name_And_Version()
     {
+        EnsureRepository();
+
         var application = CreateApplication("custom-metadata");
 
         var exitCode = await application.RunAsync(
@@ -128,6 +153,7 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
                 "1.0.0",
             ]
         );
+        exitCode.ShouldBe(0, "adding the cloned repository with custom metadata should succeed.");
 
         var packageStore = CreatePackageStore("custom-metadata");
         var package = (
@@ -138,7 +164,6 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         package.PackageId.ShouldBe("my-library");
         package.Version.ShouldBe("1.0.0");
         source.ShouldNotBeNull();
@@ -153,6 +178,8 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Save_Local_Package_Copy_For_Sharing()
     {
+        EnsureRepository();
+
         var application = CreateApplication("saved-copy");
         var savedCopyPath = Path.Combine(_root, "shared", "skills@1.0.0.db");
 
@@ -180,6 +207,8 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Local_Saved_Database_File()
     {
+        EnsureRepository();
+
         var savedCopyPath = Path.Combine(_root, "mattpocock-skills@1.2.3.db");
         var sourceExitCode = await CreateApplication("local-file-source")
             .RunAsync(
@@ -221,11 +250,12 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
         );
 
         var exitCode = await destinationApplication.RunAsync(["add", savedCopyPath]);
+        exitCode.ShouldBe(0, "adding the saved database file should succeed.");
+
         var package = (
             await destinationStore.ListAsync(TestContext.Current.CancellationToken)
         ).ShouldHaveSingleItem();
 
-        exitCode.ShouldBe(0);
         package.PackageId.ShouldBe("mattpocock-skills");
         package.Version.ShouldBe("1.2.3");
         package.DocumentCount.ShouldBeGreaterThan(0);
@@ -236,6 +266,8 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Package_From_Locally_Hosted_Database_Url()
     {
+        EnsureRepository();
+
         var savedCopyPath = Path.Combine(_root, "shared", "mattpocock-skills@1.2.3.db");
         var sourceApplication = CreateApplication("host-source");
         var sourceExitCode = await sourceApplication.RunAsync(
@@ -280,12 +312,12 @@ public sealed class AddFromDirectoryIntegrationTests : IDisposable
 
         var exitCode = await destinationApplication.RunAsync(["add", server.Url]);
         await servingTask;
+        exitCode.ShouldBe(0, "adding the package from the local server should succeed.");
 
         var package = (
             await destinationStore.ListAsync(TestContext.Current.CancellationToken)
         ).ShouldHaveSingleItem();
 
-        exitCode.ShouldBe(0);
         package.PackageId.ShouldBe("mattpocock-skills");
         package.Version.ShouldBe("1.2.3");
         package.DocumentCount.ShouldBeGreaterThan(0);

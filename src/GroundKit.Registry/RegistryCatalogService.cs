@@ -1,31 +1,54 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using GroundKit.Core.Contracts;
+using GroundKit.Oci;
 using Microsoft.Data.Sqlite;
 
 namespace GroundKit.Registry;
 
 public sealed class RegistryCatalogService
 {
+    /// <summary>
+    /// Builds the static catalog.
+    /// </summary>
+    /// <param name="assetBaseUrl">
+    /// Release asset base URL. Required unless <paramref name="ociReferences"/> is supplied, in
+    /// which case packages are served from the OCI registry instead.
+    /// </param>
+    /// <param name="ociReferences">
+    /// Maps <c>registry/name@version</c> onto an <c>oci://</c> reference. When set, no local asset
+    /// copies are written and every package must have been pushed.
+    /// </param>
     public async Task<string> CreateAsync(
         string definitionDirectory,
         string packageDirectory,
         string destinationDirectory,
-        string assetBaseUrl,
-        CancellationToken cancellationToken = default
+        string? assetBaseUrl,
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? ociReferences = null
     )
     {
-        if (!Uri.TryCreate(assetBaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out var baseUri)
-            || baseUri.Scheme != Uri.UriSchemeHttps)
+        var usesOci = ociReferences is not null;
+        var baseUri = default(Uri);
+        if (!usesOci)
         {
-            throw new ArgumentException("Asset base URL must be an absolute HTTPS URL.", nameof(assetBaseUrl));
+            if (!Uri.TryCreate((assetBaseUrl ?? string.Empty).TrimEnd('/') + "/", UriKind.Absolute, out baseUri)
+                || baseUri.Scheme != Uri.UriSchemeHttps)
+            {
+                throw new ArgumentException("Asset base URL must be an absolute HTTPS URL.", nameof(assetBaseUrl));
+            }
         }
 
         var definitions = RegistryDefinitionLoader.LoadDirectory(definitionDirectory);
         RegistryDefinitionLoader.Validate(definitions);
         var entries = new List<RegistryCatalogEntry>();
         var assets = Path.Combine(destinationDirectory, "assets");
-        Directory.CreateDirectory(assets);
+        Directory.CreateDirectory(destinationDirectory);
+        if (!usesOci)
+        {
+            Directory.CreateDirectory(assets);
+        }
+
         foreach (var path in Directory.EnumerateFiles(packageDirectory, "*.db")
             .OrderBy(path => path, StringComparer.Ordinal))
         {
@@ -62,13 +85,33 @@ public sealed class RegistryCatalogService
                 throw new InvalidDataException($"Duplicate package '{definition.Registry}/{name}@{version}'.");
             }
 
-            await using var stream = File.OpenRead(path);
-            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+            var size = new FileInfo(path).Length;
+            var hash = await ComputeHashAsync(path, cancellationToken);
+            if (usesOci)
+            {
+                if (!ociReferences!.TryGetValue(
+                        RegistryOciPublisher.Key(definition.Registry, name, version),
+                        out var reference))
+                {
+                    throw new InvalidDataException(
+                        $"Package '{definition.Registry}/{name}@{version}' has no OCI reference. Re-run 'registry push-oci'."
+                    );
+                }
+
+                var parsed = OciReference.Parse(reference);
+                entries.Add(new RegistryCatalogEntry(
+                    definition.Registry, name, version, definition.Description,
+                    $"https://{parsed.Host}/v2/{parsed.Repository}/manifests/{parsed.Reference}",
+                    size, hash, OciReference: reference
+                ));
+                continue;
+            }
+
             var assetName = hash + ".db";
             File.Copy(path, Path.Combine(assets, assetName), overwrite: true);
             entries.Add(new RegistryCatalogEntry(
                 definition.Registry, name, version, definition.Description,
-                new Uri(baseUri, assetName).AbsoluteUri, stream.Length, hash
+                new Uri(baseUri!, assetName).AbsoluteUri, size, hash
             ));
         }
         if (entries.Count == 0)
@@ -85,4 +128,11 @@ public sealed class RegistryCatalogService
             cancellationToken);
         return indexPath;
     }
+
+    private static async Task<string> ComputeHashAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = File.OpenRead(path);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+    }
 }
+

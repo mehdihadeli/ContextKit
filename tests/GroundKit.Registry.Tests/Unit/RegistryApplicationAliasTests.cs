@@ -9,8 +9,6 @@ public sealed class RegistryApplicationAliasTests
     [InlineData("v", "validate")]
     [InlineData("b", "build")]
     [InlineData("ba", "build-all")]
-    [InlineData("p", "publish")]
-    [InlineData("pa", "publish-all")]
     [InlineData("bd", "bundle")]
     [InlineData("ib", "import-bundle")]
     public void Should_Normalize_Short_Command_Aliases(string alias, string expected)

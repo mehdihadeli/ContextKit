@@ -29,6 +29,17 @@ public static class ServiceCollectionExtensions
                 AddConfiguredHeaders(client, options);
             }
         );
+        // OCI pulls target a per-artifact registry host, so the base address is assigned by the
+        // caller while the handler and configured headers come from this named client.
+        services.AddHttpClient(
+            "groundkit-oci",
+            (serviceProvider, client) =>
+            {
+                var options = serviceProvider.GetRequiredService<GroundKitOptions>();
+                client.Timeout = TimeSpan.FromMinutes(10);
+                AddConfiguredHeaders(client, options);
+            }
+        );
         services.AddSingleton<ISourceDetector, SourceDetector>();
         services.AddSingleton<IGitReferenceProvider, GitReferenceProvider>();
         services.AddSingleton<IDocumentPackageBuilder, DocumentPackageBuilder>();

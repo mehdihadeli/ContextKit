@@ -2,7 +2,8 @@
 
 `GroundKit.Registry` implements the `groundkit registry` commands as a library.
 Use it to validate community definitions, build SQLite documentation packages,
-create bundles, and publish packages to an API. It does not run an HTTP server.
+create bundles, and publish packages as content-addressed OCI artifacts.
+It does not run an HTTP server.
 
 ## Which project to use
 
@@ -10,27 +11,27 @@ create bundles, and publish packages to an API. It does not run an HTTP server.
 | --- | --- | --- |
 | `GroundKit.Cli` | Install, inspect, query, and manage local packages; start MCP; expose maintainer commands. | `groundkit` |
 | `GroundKit.Registry` | Read definitions and build, bundle, or publish artifacts. | `groundkit registry <command>` |
-| `GroundKit.Registry.Server` | Host registry search, metadata, downloads, and authenticated uploads. | Independent .NET application or Docker Compose. |
 
-Building and bundling need no registry server. Publishing needs a compatible
-API. See the [CLI README](../GroundKit.Cli/README.md) for consumer commands and
-the [server README](../GroundKit.Registry.Server/README.md) for hosting.
+Building and bundling need no registry access. Publishing needs an OCI registry
+such as GHCR. See the [CLI README](../GroundKit.Cli/README.md) for consumer
+commands.
 
 ## Distribution flow
 
 The workflow builds package files, not a running registry service. This diagram
-shows the Actions artifact path and optional API path. The Releases + Pages
-deployment is described below under public distribution.
+shows the OCI artifact path, the catalog path, and the optional API path. The
+Pages deployment is described below under public distribution.
 
 ```mermaid
 flowchart TD
     definitions["registry/&lt;manager&gt;/*.yaml"] --> workflow["Registry Update workflow"]
     workflow --> tooling["groundkit registry commands<br/>GroundKit.Registry library"]
     tooling -->|validate and build-all| packages["dist-packages/*.db"]
-    packages --> artifacts["GitHub Actions artifacts<br/>14-day retention"]
-    artifacts -->|Download artifact, then import| consumer["GroundKit.Cli<br/>groundkit"]
-    tooling -.->|Optional publish or publish-all| server["GroundKit.Registry.Server<br/>Optional self-hosted API"]
-    server -.->|Search metadata and download packages| consumer
+    packages -->|push-oci| ghcr["GitHub Container Registry<br/>content-addressed OCI artifacts"]
+    packages -->|catalog-index --oci-references| catalog["index.json<br/>no local assets"]
+    ghcr -->|Digest-pinned manifest and blob pulls| consumer
+    catalog -->|GitHub Actions artifact, then Pages| pages["registry/index.json"]
+    pages -->|Catalog discovery| consumer["GroundKit.Cli<br/>groundkit"]
     consumer -->|Install or import| local[("Local SQLite packages")]
     local --> queries["CLI queries and MCP<br/>No registry access needed"]
 ```
@@ -39,14 +40,12 @@ flowchart TD
 | --- | --- | --- |
 | Define | Contributors describe documentation sources in YAML and submit PRs. | Contributors and maintainers. |
 | Build | `registry validate` checks definitions; `registry build-all` creates `.db` artifacts. | The current workflow, or a local maintainer. |
-| Distribute | Publish Release snapshots and Actions artifacts; optionally upload to a reachable registry API. | Workflow or maintainer. |
-| Install | Import a downloaded artifact, or use `search-packages`, `download-package`, and `install` against the API. | Consumer CLI. |
+| Distribute | `registry push-oci` publishes `.db` artifacts to GHCR; the catalog ships as a workflow artifact and is deployed to Pages. | Workflow or maintainer. |
+| Install | Install from the static catalog using `search-packages`, `download-package`, and `install`; those commands verify size and SHA-256 before import. | Consumer CLI. |
 | Query | Read the installed SQLite package through `query` or MCP. | Consumer CLI and agents. |
 
-The optional server stores metadata in SQLite and artifacts in S3-compatible
-storage. It receives built packages; it does not read definitions or build docs.
-The consumer does not need publishing credentials. After installation, queries
-continue working when the distribution service is offline.
+The consumer needs no publishing credentials and no running service. After
+installation, queries continue working offline.
 
 ### Which commands belong in GitHub Actions?
 
@@ -61,37 +60,20 @@ dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
   registry build-all --dir registry --output ./dist-packages
 ```
 
-The workflow also runs `catalog-index` and publishes a snapshot Release on
-`main`. Uploading Actions artifacts alone does not enable named-package discovery.
-Choose the distribution path by target:
+The workflow also publishes every package to GHCR with `push-oci`, then runs
+`catalog-index` and uploads the catalog as an Actions artifact. Uploading the
+catalog alone does not enable named-package discovery; the docs workflow deploys
+it to Pages. Choose the distribution path by target:
 
 | Target | Registry commands | Upload or deployment step | Current status |
 | --- | --- | --- | --- |
-| Actions artifacts | `validate`, `build-all` | `actions/upload-artifact` uploads `.db` files. | Implemented in the workflow; temporary distribution. |
-| Optional self-hosted API | `validate`, `publish-all` | Tool builds packages and uploads them to the configured API. | Commands implemented; not enabled in the workflow. |
-| GitHub Releases + Pages | `validate`, `build-all`, `catalog-index` | Registry workflow uploads a snapshot; docs workflow deploys its catalog alongside the site. | Implemented; requires successful CI and Pages setup. |
+| OCI registry (GHCR) + Pages | `validate`, `build-all`, `push-oci`, `catalog-index` | Workflow pushes artifacts to GHCR and uploads `index.json`; docs workflow deploys it to Pages. | Implemented in the workflow; requires successful CI and Pages setup. |
+| Actions artifacts | `validate`, `build-all` | `actions/upload-artifact` uploads `.db` files. | Available for ad-hoc transfers; not used for consumer distribution. |
 
-For API publishing, use `publish-all` in place of the `build-all` step. It builds
-missing registry versions and uploads them; it does not merely upload every
-existing file in the output directory. A workflow publishing step would look like:
-
-```yaml
-- name: Build and publish to optional registry API
-  env:
-    REGISTRY_SERVER_URL: ${{ vars.REGISTRY_SERVER_URL }}
-    REGISTRY_PUBLISH_KEY: ${{ secrets.REGISTRY_PUBLISH_KEY }}
-  run: |
-    dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
-      registry publish-all --dir registry --output ./dist-packages
-```
-
-Configure both values before enabling this step. The API must be reachable from
-the runner; `localhost` on a GitHub-hosted runner is not your self-hosted server.
-Publish only from trusted, merged definitions, not contributor PR jobs.
-
-For Releases + Pages, use the build and catalog commands plus GitHub upload and
-deployment steps, not API `publish-all`. Consumers configure the complete
-`registry/index.json` URL and use the existing search and install commands.
+Publish only from trusted, merged definitions on the default branch, never from
+contributor PR jobs. Consumers configure the complete `registry/index.json` URL
+and use the existing search and install commands. Published packages are never
+attached to GitHub Releases, so releases stay free of hash-named assets.
 
 ## Run
 
@@ -125,19 +107,20 @@ Every command below follows `groundkit registry`. `<argument>` is required;
 | `validate` | `v`, `val` | Validate definition syntax, required fields, and package identities. |
 | `build <name> [version]` | `b` | Build one definition into a SQLite package. |
 | `build-all` | `ba` | Build all definitions and declared versions; continue after failures and exit nonzero if any fail. |
-| `publish <name> [version]` | `p`, `pub` | Check the target API, skip an existing version, otherwise build and upload it. |
-| `publish-all` | `pa` | Build and upload all declared versions, skipping existing ones; exit nonzero if any fail. |
 | `bundle` | `bd`, `bun` | Archive built `.db` files with `index.json` and `SHA256SUMS`. |
 | `import-bundle <path>` | `ib` | Extract a bundle into an artifact directory, without installing it in the local store. |
-| `catalog-index` | None | Generate static catalog metadata and content-addressed Release asset copies. |
+| `push-oci` | `po` | Push every built package to an OCI registry and write the digest-pinned reference map. |
+| `catalog-index` | None | Generate static catalog metadata, either for OCI artifacts or for content-addressed asset copies. |
 
 | Option | Alias | Applies to | Default |
 | --- | --- | --- | --- |
-| `--dir <path>` | `-d` | List, validate, build, publish, and catalog-index commands | `registry` |
-| `--output <path>` | `-o` | Build, publish, bundle, import-bundle, and catalog-index commands | `./dist-packages` |
+| `--dir <path>` | `-d` | List, validate, build, push-oci, and catalog-index commands | `registry` |
+| `--output <path>` | `-o` | Build, push-oci, bundle, import-bundle, and catalog-index commands | `./dist-packages` |
 | `--format <format>` | `-f` | `bundle` | `zip`; also accepts `tar.gz` and `tgz` |
 | `--destination <path>` | `-t` | `bundle`, `catalog-index` | Bundle archive path, or catalog directory (`./dist-catalog`). |
-| `--base-url <URL>` | None | `catalog-index` | Required HTTPS asset directory URL for a Release snapshot. |
+| `--oci-repository <host/path>` | None | `push-oci`, `catalog-index` | Target OCI repository; required by `push-oci`, for example `ghcr.io/owner/groundkit`. |
+| `--oci-references <path>` | None | `push-oci`, `catalog-index` | Digest-pinned reference map. Written by `push-oci`, read by `catalog-index`. Default `oci-references.json`. |
+| `--base-url <URL>` | None | `catalog-index` | HTTPS asset directory URL. Required only when no OCI target is supplied. |
 | `--help` | `-h` | Any command | Show command help. |
 
 ## Build and inspect a package
@@ -211,69 +194,94 @@ Contributors can submit definitions through pull requests without hosting or
 publishing credentials. See the [community registry guide](../../registry/README.md)
 for manager-specific formats, exclusions, and contribution checks.
 
-## Publish to a self-hosted API
+## Publish to an OCI registry
 
-Start the separate [server](../GroundKit.Registry.Server/README.md), then
-configure this tool's publishing client:
+Publishing pushes each built SQLite package as a single-layer OCI manifest and
+writes the digest-pinned reference map that `catalog-index` consumes:
 
 | Environment variable | Purpose |
 | --- | --- |
-| `REGISTRY_SERVER_URL` | Publishing API base URL; defaults to `http://localhost:8080`. |
-| `REGISTRY_PUBLISH_KEY` | Required upload bearer token; must match the server configuration. |
+| `GROUNDKIT_OCI_USERNAME` | Registry username; falls back to `GITHUB_ACTOR`. |
+| `GROUNDKIT_OCI_TOKEN` | Registry token or password; falls back to `GITHUB_TOKEN`. |
+| `DOCKER_CONFIG` | Directory holding `config.json`; defaults to `~/.docker`. |
+
+When neither variable is set, credentials come from the Docker credential file at
+`$DOCKER_CONFIG/config.json`. That is the file `docker/login-action` writes, which
+is why the Registry Update workflow logs in with `docker/login-action` instead of
+exporting a token. Entries are matched by registry host, so a config holding
+several registries never sends one host's token to another; credential stores and
+helpers are not invoked.
 
 ```powershell
-$env:REGISTRY_SERVER_URL = "http://localhost:8080"
-# Supply REGISTRY_PUBLISH_KEY through your environment or secret manager.
-groundkit registry publish react --dir registry --output ./dist-packages
+groundkit registry build-all --dir registry --output ./dist-packages
+$env:GROUNDKIT_OCI_USERNAME = "<user>"
+# Supply GROUNDKIT_OCI_TOKEN through your environment or secret manager.
+groundkit registry push-oci --dir registry --output ./dist-packages `
+  --oci-repository ghcr.io/OWNER/REPOSITORY --oci-references ./oci-references.json
 ```
 
-Building and bundling do not need a publish key. Keep keys out of committed
+Building and bundling need no credentials. Keep tokens out of committed
 configuration and contributor PR jobs. Consumer commands use `GROUNDKIT_REGISTRY_URL`
-or project `RegistryUrl`, not `REGISTRY_SERVER_URL`.
+or project `RegistryUrl`.
 
 ## Public distribution status
 
 The [Registry Update workflow](../../.github/workflows/registry-update.yml)
-validates and builds definitions through the main CLI, then uploads `.db` files
-as Actions artifacts retained for 14 days. On `main`, it also creates a Release
-tagged `registry-<run-id>-<attempt>` containing content-addressed `.db` assets and
-`index.json`. Assets are uploaded to a draft before it is published; the workflow
-never overwrites published snapshot assets or marks registry snapshots as the
-latest CLI release. Enable GitHub release immutability for platform enforcement.
+validates and builds definitions through the main CLI, then pushes every built
+package to the GitHub Container Registry as a content-addressed OCI artifact
+with `registry push-oci`. Each artifact is a single-layer OCI manifest, and the
+layer is the SQLite package itself, so the registry stores packages as GB-scale
+blobs addressed by digest rather than as Release assets.
+
+The workflow then runs `registry catalog-index --oci-references` to generate
+`index.json`, which addresses each package by manifest digest and omits local
+asset copies. The catalog is uploaded as a workflow artifact. No GitHub Release
+is created, so the repository's release list stays clean and no hash-named `.db`
+files appear as downloadable assets.
 
 The [Pages workflow](../../.github/workflows/deploy-docs.yml) runs after successful
-registry updates. It builds the existing documentation site, copies the newest
-published registry catalog into `registry/index.json`, and deploys both together.
-Every documentation deployment preserves the catalog from the newest snapshot.
+registry updates. It builds the existing documentation site, downloads the newest
+catalog artifact into `registry/index.json`, and deploys both together. Every
+documentation deployment preserves the newest available catalog.
 
 ```mermaid
 flowchart LR
-    build["validate and build-all"] --> catalog["catalog-index<br/>index.json and hashed .db assets"]
-    catalog --> release["Publish snapshot Release"]
-    release --> pages["Docs workflow deploys catalog<br/>alongside existing site"]
-    pages --> cli["CLI finds packages and verifies downloads"]
+    build["validate and build-all"] --> push["push-oci<br/>GHCR content-addressed artifacts"]
+    build --> catalog["catalog-index --oci-references<br/>index.json, no local assets"]
+    catalog --> artifact["Workflow artifact"]
+    artifact --> pages["Docs workflow deploys catalog<br/>alongside existing site"]
+    push --> cli["CLI resolves manifest digest,<br/>downloads blob, verifies SHA-256"]
+    pages --> cli
 ```
 
-Generate a catalog locally using an intended snapshot asset URL:
+Generate a catalog locally for an OCI-backed snapshot:
 
 ```bash
+GROUNDKIT_OCI_USERNAME=<user> GROUNDKIT_OCI_TOKEN=<token> \
+  groundkit registry push-oci --dir registry --output ./dist-packages \
+  --oci-repository ghcr.io/OWNER/REPOSITORY \
+  --oci-references ./oci-references.json
+
 groundkit registry catalog-index --dir registry --output ./dist-packages \
-  --destination ./dist-catalog \
-  --base-url https://github.com/OWNER/REPOSITORY/releases/download/registry-SNAPSHOT/
+  --destination ./dist-catalog --oci-references ./oci-references.json
 ```
 
-This creates `index.json` and an `assets/` directory; it does not upload files.
+OCI mode writes only `index.json`; it does not create an `assets/` directory.
 The generator reads identity/version from each SQLite manifest and matches it to
-one definition. Unknown, ambiguous, or duplicate identities fail generation.
-Each catalog entry contains registry, name, version, description, HTTPS download
-URL, byte size, SHA-256, and optional source commit. Schema version is `1`.
+one definition. Unknown, ambiguous, or duplicate identities fail generation, and
+a package missing from the reference map is a hard error, so a partially pushed
+release cannot produce a catalog that points at artifacts which do not exist.
+Each entry contains registry, name, version, description, an HTTPS manifest URL,
+byte size, SHA-256, an `oci://` reference, and optional source commit. Schema
+version is `1`.
 
 Consumers set `RegistryUrl` or `GROUNDKIT_REGISTRY_URL` to the full deployed
 `registry/index.json` URL. They use existing `search-packages`, `download-package`,
-and `install` commands; static downloads reject size or checksum mismatches before
-import. API URLs continue to use the optional self-hosted server.
+and `install` commands; the OCI download path resolves the single manifest layer,
+checks the size, and verifies SHA-256 before import.
 
-Enable Pages with the GitHub Actions source and permit workflow Release writes.
-Both workflows must be on the default branch; all build/test gates must pass.
-No public catalog exists until a snapshot and subsequent Pages deployment succeed.
-This workflow does not deploy a public API, create bundles, or upload OCI artifacts.
+Enable Pages with the GitHub Actions source. Both workflows must be on the
+default branch; all build/test gates must pass. No public catalog exists until a
+Pages deployment succeeds. GHCR creates packages private on first publish, so a
+one-time visibility flip per package is required before anonymous installs work.
+This workflow does not create bundles.

@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text.RegularExpressions;
 using GroundKit.Core.Abstractions;
 using GroundKit.Core.Contracts;
+using GroundKit.Oci;
 using GroundKit.Storage.Sqlite;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
@@ -11,8 +12,8 @@ namespace GroundKit.Registry;
 public sealed class RegistryApplication(
     IDocumentPackageBuilder packageBuilder,
     ILoggerFactory loggerFactory,
-    RegistryPublisher publisher,
-    IHttpClientFactory httpClientFactory
+    IHttpClientFactory httpClientFactory,
+    HttpClient? ociHttpClient = null
 )
 {
     private readonly RegistryBundleService _bundleService = new();
@@ -46,12 +47,11 @@ public sealed class RegistryApplication(
                 "list" => List(args),
                 "validate" => Validate(args),
                 "build" => await BuildAsync(args),
-                "build-all" => await BuildAllAsync(args, false),
-                "publish" => await PublishAsync(args),
-                "publish-all" => await BuildAllAsync(args, true),
+                "build-all" => await BuildAllAsync(args),
                 "bundle" => await BundleAsync(args),
                 "import-bundle" => await ImportBundleAsync(args),
                 "catalog-index" => await CatalogIndexAsync(args),
+                "push-oci" => await PushOciAsync(args),
                 _ => ShowHelp(),
             };
         }
@@ -85,14 +85,12 @@ public sealed class RegistryApplication(
             "b" => "build",
             "--build-all" => "build-all",
             "ba" => "build-all",
-            "--publish" => "publish",
-            "p" or "pub" => "publish",
-            "--publish-all" => "publish-all",
-            "pa" => "publish-all",
             "--bundle" => "bundle",
             "bd" or "bun" => "bundle",
             "--import-bundle" => "import-bundle",
             "ib" => "import-bundle",
+            "--push-oci" => "push-oci",
+            "po" => "push-oci",
             _ => command?.ToLowerInvariant(),
         };
 
@@ -135,40 +133,7 @@ public sealed class RegistryApplication(
         return 0;
     }
 
-    private async Task<int> PublishAsync(string[] args)
-    {
-        if (args.Length < 2)
-        {
-            AnsiConsole.MarkupLine(
-                "[red]Usage:[/] "
-                    + Markup.Escape("publish <name> [version] [--dir <path>] [--output <path>]")
-            );
-            return 1;
-        }
-
-        var definition = Find(Load(args), args[1]);
-        var selected = SelectVersion(definition, args);
-        if (await publisher.ExistsAsync(definition.Registry, definition.Name, selected.Version))
-        {
-            AnsiConsole.MarkupLine(
-                $"Skipped existing: {definition.Registry}/{definition.Name}@{selected.Version}"
-            );
-            return 0;
-        }
-
-        var path = await BuildDefinitionAsync(
-            definition,
-            Option(args, "--output") ?? "./dist-packages",
-            selected
-        );
-        await publisher.PublishAsync(definition.Registry, definition.Name, selected.Version, path);
-        AnsiConsole.MarkupLine(
-            $"[green]Published:[/] {definition.Registry}/{definition.Name}@{selected.Version}"
-        );
-        return 0;
-    }
-
-    private async Task<int> BuildAllAsync(string[] args, bool publish)
+    private async Task<int> BuildAllAsync(string[] args)
     {
         var definitions = Load(args);
         var output = Option(args, "--output") ?? "./dist-packages";
@@ -182,34 +147,10 @@ public sealed class RegistryApplication(
         {
             try
             {
-                if (
-                    publish
-                    && await publisher.ExistsAsync(
-                        definition.Registry,
-                        definition.Name,
-                        selected.Version
-                    )
-                )
-                {
-                    AnsiConsole.MarkupLine(
-                        $"Skipped existing: {definition.Registry}/{definition.Name}@{selected.Version}"
-                    );
-                    continue;
-                }
-
-                var path = await BuildDefinitionAsync(definition, output, selected);
-                if (publish)
-                {
-                    await publisher.PublishAsync(
-                        definition.Registry,
-                        definition.Name,
-                        selected.Version,
-                        path
-                    );
-                }
+                await BuildDefinitionAsync(definition, output, selected);
                 succeeded++;
                 AnsiConsole.MarkupLine(
-                    $"[green]{(publish ? "Published" : "Built")}:[/] {definition.Registry}/{definition.Name}@{selected.Version}"
+                    $"[green]Built:[/] {definition.Registry}/{definition.Name}@{selected.Version}"
                 );
             }
             catch (Exception exception)
@@ -250,14 +191,124 @@ public sealed class RegistryApplication(
 
     private async Task<int> CatalogIndexAsync(string[] args)
     {
+        var ociRepository = Option(args, "--oci-repository");
+        var referencesPath = Option(args, "--oci-references");
+        var ociReferences = await ResolveOciReferencesAsync(args, referencesPath, ociRepository);
+        var baseUrl = Option(args, "--base-url");
+        if (ociReferences is null && string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new ArgumentException(
+                "--base-url is required unless --oci-repository or --oci-references is supplied for catalog-index."
+            );
+        }
+
         var index = await new RegistryCatalogService().CreateAsync(
             Option(args, "--dir") ?? "registry",
             Option(args, "--output") ?? "./dist-packages",
             Option(args, "--destination") ?? "./dist-catalog",
-            Option(args, "--base-url") ?? throw new ArgumentException("--base-url is required for catalog-index.")
+            baseUrl,
+            cancellationToken: default,
+            ociReferences
         );
+        if (ociReferences is not null)
+        {
+            AnsiConsole.MarkupLine(
+                $"[green]Catalog references {ociReferences.Count} OCI artifact(s).[/]"
+            );
+        }
+
         AnsiConsole.MarkupLine($"[green]Catalog created:[/] {Markup.Escape(index)}");
         return 0;
+    }
+
+    /// <summary>
+    /// Pushes every built package to an OCI registry and writes the reference map that
+    /// <c>catalog-index</c> consumes.
+    /// </summary>
+    private async Task<int> PushOciAsync(string[] args)
+    {
+        var ociRepository =
+            Option(args, "--oci-repository")
+            ?? throw new ArgumentException("--oci-repository is required for push-oci.");
+        var output = Option(args, "--output") ?? "./dist-packages";
+        var referencesPath = Option(args, "--oci-references") ?? "oci-references.json";
+        var (host, prefix) = RegistryOciPublisher.Split(ociRepository);
+
+        if (ociHttpClient is null)
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+            client.BaseAddress = new Uri($"https://{host}/");
+            return await PushOciCoreAsync(args, client, host, prefix, output, referencesPath);
+        }
+
+        ociHttpClient.BaseAddress ??= new Uri($"https://{host}/");
+        return await PushOciCoreAsync(args, ociHttpClient, host, prefix, output, referencesPath);
+    }
+
+    private async Task<int> PushOciCoreAsync(
+        string[] args,
+        HttpClient httpClient,
+        string host,
+        string prefix,
+        string output,
+        string referencesPath
+    )
+    {
+        var publisher = new RegistryOciPublisher(
+            new OciRegistryClient(httpClient, OciCredential.FromEnvironment(host)),
+            host,
+            prefix
+        );
+        var references = await publisher.PushAllAsync(
+            Load(args),
+            output,
+            pushed => AnsiConsole.MarkupLine($"[green]Pushed:[/] {Markup.Escape(pushed)}")
+        );
+        await RegistryOciPublisher.WriteAsync(references, referencesPath);
+        AnsiConsole.MarkupLine(
+            $"[green]Pushed {references.Packages.Count} package(s) to {Markup.Escape(references.Repository)}.[/]"
+        );
+        AnsiConsole.MarkupLine($"[green]OCI references:[/] {Markup.Escape(referencesPath)}");
+        return 0;
+    }
+
+    /// <summary>
+    /// Prefers the digest-pinned map produced by <c>push-oci</c>. When only a repository is known,
+    /// falls back to tag references, which remain safe because the catalog still pins each
+    /// package's SHA-256.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<string, string>?> ResolveOciReferencesAsync(
+        string[] args,
+        string? referencesPath,
+        string? ociRepository
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(referencesPath))
+        {
+            return RegistryOciPublisher.ToLookup(
+                await RegistryOciPublisher.ReadAsync(referencesPath)
+            );
+        }
+
+        if (string.IsNullOrWhiteSpace(ociRepository))
+        {
+            return null;
+        }
+
+        var (host, prefix) = RegistryOciPublisher.Split(ociRepository);
+        var references = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var definition in Load(args))
+        {
+            foreach (var (version, _) in definition.ResolveVersions())
+            {
+                var repository = $"{prefix}/{OciNames.RepositoryName(definition.Registry, definition.Name)}";
+                var tag = OciNames.Sanitize(version);
+                references[RegistryOciPublisher.Key(definition.Registry, definition.Name, version)] =
+                    $"oci://{host}/{repository}:{tag}";
+            }
+        }
+
+        return references;
     }
 
     private async Task<int> ImportBundleAsync(string[] args)
@@ -463,7 +514,7 @@ public sealed class RegistryApplication(
     {
         AnsiConsole.MarkupLine(
             Markup.Escape(
-                "groundkit registry list|validate|build|build-all|publish|publish-all|bundle|import-bundle|catalog-index [--dir <path>] [--output <path>] [--allow-failures]"
+                "groundkit registry list|validate|build|build-all|push-oci|bundle|import-bundle|catalog-index [--dir <path>] [--output <path>] [--allow-failures]"
             )
         );
         return 0;

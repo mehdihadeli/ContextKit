@@ -41,8 +41,11 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Website_Root_And_Auto_Detect_Llms_Text()
     {
+        TestNetwork.RequireUrl(WebsiteRoot);
+
         var packageStore = CreatePackageStore("root");
         var exitCode = await CreateApplication(packageStore).RunAsync(["add", WebsiteRoot]);
+        exitCode.ShouldBe(0, $"adding '{WebsiteRoot}' should download and build the package.");
 
         var package = (
             await packageStore.ListAsync(TestContext.Current.CancellationToken)
@@ -52,7 +55,6 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         source.ShouldNotBeNull();
         source.Kind.ShouldBe(SourceKind.LlmsText);
         source.Location.ShouldBe(WebsiteRoot);
@@ -64,9 +66,12 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Direct_Llms_Text_With_Custom_Name()
     {
+        TestNetwork.RequireUrl(LlmsTextUrl);
+
         var packageStore = CreatePackageStore("direct");
         var exitCode = await CreateApplication(packageStore)
             .RunAsync(["add", LlmsTextUrl, "--name", "agent-gateway"]);
+        exitCode.ShouldBe(0, $"adding '{LlmsTextUrl}' should download and build the package.");
 
         var package = (
             await packageStore.ListAsync(TestContext.Current.CancellationToken)
@@ -76,7 +81,6 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         package.PackageId.ShouldBe("agent-gateway");
         package.DisplayName.ShouldBe("agent-gateway");
         source.ShouldNotBeNull();
@@ -91,6 +95,8 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Save_Website_Package_Copy_With_Custom_Version()
     {
+        TestNetwork.RequireUrl(LlmsTextUrl);
+
         var packageStore = CreatePackageStore("saved-copy");
         var savedCopyPath = Path.Combine(_root, "shared", "agent-gateway@1.0.0.db");
         var exitCode = await CreateApplication(packageStore)
@@ -106,12 +112,12 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
                     savedCopyPath,
                 ]
             );
+        exitCode.ShouldBe(0, $"adding '{LlmsTextUrl}' with a saved copy should succeed.");
 
         var package = (
             await packageStore.ListAsync(TestContext.Current.CancellationToken)
         ).ShouldHaveSingleItem();
 
-        exitCode.ShouldBe(0);
         package.PackageId.ShouldBe("agent-gateway");
         package.Version.ShouldBe("1.0.0");
         File.Exists(savedCopyPath).ShouldBeTrue();
@@ -122,14 +128,16 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_Arbitrary_Blog_Article_When_Llms_Is_Not_The_Source()
     {
+        TestNetwork.RequireUrl(BlogUrl);
+
         var packageStore = CreatePackageStore("blog");
         var exitCode = await CreateApplication(packageStore).RunAsync(["add", BlogUrl]);
+        exitCode.ShouldBe(0, $"adding the article '{BlogUrl}' should build a single-document package.");
 
         var package = (
             await packageStore.ListAsync(TestContext.Current.CancellationToken)
         ).ShouldHaveSingleItem();
 
-        exitCode.ShouldBe(0);
         package.DocumentCount.ShouldBe(1);
         package.ChunkCount.ShouldBeGreaterThan(0);
     }
@@ -138,9 +146,12 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task Should_Add_GitHub_Blob_Markdown_As_Arbitrary_URL()
     {
+        TestNetwork.RequireUrl(GitHubReadmeUrl);
+
         var packageStore = CreatePackageStore("github-readme");
         var exitCode = await CreateApplication(packageStore)
             .RunAsync(["add", GitHubReadmeUrl, "--name", "agentgateway-readme"]);
+        exitCode.ShouldBe(0, $"adding '{GitHubReadmeUrl}' should download and build the package.");
 
         var package = (
             await packageStore.ListAsync(TestContext.Current.CancellationToken)
@@ -150,7 +161,6 @@ public sealed class AddFromWebsiteIntegrationTests : IDisposable
             TestContext.Current.CancellationToken
         );
 
-        exitCode.ShouldBe(0);
         package.PackageId.ShouldBe("agentgateway-readme");
         package.DocumentCount.ShouldBe(1);
         package.ChunkCount.ShouldBeGreaterThan(0);

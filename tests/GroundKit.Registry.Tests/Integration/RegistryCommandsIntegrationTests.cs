@@ -15,7 +15,7 @@ namespace GroundKit.Registry.Tests.Integration;
 
 /// <summary>
 /// Covers the registry command surface the release pipeline drives end to end:
-/// <c>catalog-index</c>, <c>bundle</c>, <c>import-bundle</c>, and <c>publish-all</c>.
+/// <c>catalog-index</c>, <c>bundle</c>, and <c>import-bundle</c>.
 /// </summary>
 [Collection(RegistryConsoleCollection.Name)]
 public sealed class RegistryCommandsIntegrationTests : IDisposable
@@ -201,8 +201,9 @@ public sealed class RegistryCommandsIntegrationTests : IDisposable
     [Theory]
     [InlineData("import-bundle", "import-bundle <path> [--output <path>]")]
     [InlineData("build", "build <name> [version] [--dir <path>] [--output <path>]")]
-    [InlineData("publish", "publish <name> [version] [--dir <path>] [--output <path>]")]
-    [InlineData("not-a-command", "[--dir <path>] [--output <path>] [--allow-failures]")]
+    // The usage line is longer than the 80-column render width, so assert a single
+    // token that word wrapping cannot split rather than a bracket phrase.
+    [InlineData("not-a-command", "[--allow-failures]")]
     public async Task Should_Render_Usage_Without_Markup_Errors(string command, string expected)
     {
         var (exitCode, outputText) = await RunAsync(command);
@@ -243,70 +244,6 @@ public sealed class RegistryCommandsIntegrationTests : IDisposable
         outputText.ShouldContain("Checksum mismatch");
     }
 
-    [Fact]
-    public async Task Should_Publish_All_Definitions_When_Registry_Is_Empty()
-    {
-        var registryRoot = Path.Combine(_root, "registry");
-        var output = Path.Combine(_root, "dist-packages");
-        var handler = new PublishingHttpMessageHandler();
-        WriteDefinition(registryRoot, "npm", "alpha", CreateAlphaRepository());
-
-        var (exitCode, outputText) = await RunPublishAllAsync(handler, registryRoot, output);
-
-        exitCode.ShouldBe(0, outputText);
-        outputText.ShouldContain("RegistryBuildFailures=0");
-        handler.Requests.ShouldBe(
-            [
-                "GET packages/npm/alpha/latest",
-                "POST packages/npm/alpha/latest",
-            ]
-        );
-        handler.PublishedBodyLength.ShouldBeGreaterThan(0);
-    }
-
-    [Fact]
-    public async Task Should_Skip_Already_Published_Definitions()
-    {
-        var registryRoot = Path.Combine(_root, "registry");
-        var output = Path.Combine(_root, "dist-packages");
-        var handler = new PublishingHttpMessageHandler { Exists = true };
-        WriteDefinition(registryRoot, "npm", "alpha", CreateAlphaRepository());
-
-        var (exitCode, outputText) = await RunPublishAllAsync(handler, registryRoot, output);
-
-        exitCode.ShouldBe(0, outputText);
-        outputText.ShouldContain("Skipped existing: npm/alpha@latest");
-        handler.Requests.ShouldBe(["GET packages/npm/alpha/latest"]);
-    }
-
-    [Fact]
-    public async Task Should_Fail_Publish_All_Without_Publish_Key()
-    {
-        var registryRoot = Path.Combine(_root, "registry");
-        var output = Path.Combine(_root, "dist-packages");
-        WriteDefinition(registryRoot, "npm", "alpha", CreateAlphaRepository());
-        var previousKey = Environment.GetEnvironmentVariable("REGISTRY_PUBLISH_KEY");
-        Environment.SetEnvironmentVariable("REGISTRY_PUBLISH_KEY", null);
-
-        try
-        {
-            var (exitCode, outputText) = await RunPublishAllAsync(
-                new PublishingHttpMessageHandler(),
-                registryRoot,
-                output,
-                setPublishKey: false
-            );
-
-            exitCode.ShouldBe(1);
-            outputText.ShouldContain("RegistryBuildFailures=1");
-            outputText.ShouldContain("REGISTRY_PUBLISH_KEY is required");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("REGISTRY_PUBLISH_KEY", previousKey);
-        }
-    }
-
     public void Dispose()
     {
         DeleteDirectoryTree(_root);
@@ -315,49 +252,8 @@ public sealed class RegistryCommandsIntegrationTests : IDisposable
     /// <summary>
     /// Writes a real SQLite package so catalog, bundle, and publish paths read genuine manifests.
     /// </summary>
-    private void BuildPackage(string outputDirectory, string packageId, string version)
-    {
-        var services = new ServiceCollection();
-        services.AddGroundKitServices();
-        using var provider = services.BuildServiceProvider();
-        var packageBuilder = provider.GetRequiredService<IDocumentPackageBuilder>();
-        var source = Path.Combine(_root, "sources", Guid.NewGuid().ToString("n"));
-        Directory.CreateDirectory(source);
-        var markdown = Path.Combine(source, "guide.md");
-        File.WriteAllText(markdown, $"# {packageId}\n\n{packageId} keeps this document.");
-
-        try
-        {
-            var result = packageBuilder
-                .BuildAsync(source, null, TestContext.Current.CancellationToken, version, null)
-                .GetAwaiter()
-                .GetResult();
-            var normalized = result with
-            {
-                Source = result.Source with { CanonicalId = packageId, DisplayName = packageId },
-                Manifest = result.Manifest with
-                {
-                    PackageId = packageId,
-                    DisplayName = packageId,
-                    Version = version,
-                    SourceCanonicalId = packageId,
-                },
-            };
-            new SqlitePackageStore(
-                new PackageStoreOptions(outputDirectory),
-                NullLogger<SqlitePackageStore>.Instance
-            )
-                .SaveAsync(normalized)
-                .GetAwaiter()
-                .GetResult();
-        }
-        finally
-        {
-            Directory.Delete(source, recursive: true);
-        }
-
-        File.Exists(Path.Combine(outputDirectory, $"{packageId}@{version}.db")).ShouldBeTrue();
-    }
+    private void BuildPackage(string outputDirectory, string packageId, string version) =>
+        TestPackageFactory.Create(_root, outputDirectory, packageId, version);
 
     private string CreateAlphaRepository() =>
         CreateGitRepository(
@@ -420,47 +316,6 @@ public sealed class RegistryCommandsIntegrationTests : IDisposable
         throw new InvalidDataException($"Bundle entry '{entryName}' was not found.");
     }
 
-    private async Task<(int ExitCode, string Output)> RunPublishAllAsync(
-        PublishingHttpMessageHandler handler,
-        string registryRoot,
-        string output,
-        bool setPublishKey = true
-    )
-    {
-        var previousKey = Environment.GetEnvironmentVariable("REGISTRY_PUBLISH_KEY");
-        if (setPublishKey && string.IsNullOrWhiteSpace(previousKey))
-        {
-            Environment.SetEnvironmentVariable("REGISTRY_PUBLISH_KEY", "test-publish-key");
-        }
-
-        try
-        {
-            var services = new ServiceCollection();
-            services.AddGroundKitServices();
-            using var provider = services.BuildServiceProvider();
-            var application = new RegistryApplication(
-                provider.GetRequiredService<IDocumentPackageBuilder>(),
-                NullLoggerFactory.Instance,
-                new RegistryPublisher(
-                    new HttpClient(handler, disposeHandler: false)
-                    {
-                        BaseAddress = new Uri("https://registry.example.test/"),
-                    }
-                ),
-                provider.GetRequiredService<IHttpClientFactory>()
-            );
-
-            return await RunCoreAsync(
-                application,
-                ["publish-all", "--dir", registryRoot, "--output", output]
-            );
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("REGISTRY_PUBLISH_KEY", previousKey);
-        }
-    }
-
     private static Task<(int ExitCode, string Output)> RunAsync(string command, params string[] args) =>
         RunCoreAsync(CreateApplication(), [command, .. args]);
 
@@ -472,7 +327,6 @@ public sealed class RegistryCommandsIntegrationTests : IDisposable
         return new RegistryApplication(
             provider.GetRequiredService<IDocumentPackageBuilder>(),
             NullLoggerFactory.Instance,
-            new RegistryPublisher(new HttpClient()),
             provider.GetRequiredService<IHttpClientFactory>()
         );
     }
@@ -504,30 +358,6 @@ public sealed class RegistryCommandsIntegrationTests : IDisposable
         finally
         {
             AnsiConsole.Console = previous;
-        }
-    }
-
-    private sealed class PublishingHttpMessageHandler : HttpMessageHandler
-    {
-        public bool Exists { get; init; }
-
-        public List<string> Requests { get; } = [];
-
-        public long PublishedBodyLength { get; private set; }
-
-        protected override async Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken
-        )
-        {
-            Requests.Add($"{request.Method.Method} {request.RequestUri!.AbsolutePath.TrimStart('/')}");
-            if (request.Method == HttpMethod.Get)
-            {
-                return new HttpResponseMessage(Exists ? HttpStatusCode.OK : HttpStatusCode.NotFound);
-            }
-
-            PublishedBodyLength = (await request.Content!.ReadAsByteArrayAsync(cancellationToken)).Length;
-            return new HttpResponseMessage(HttpStatusCode.Created);
         }
     }
 }

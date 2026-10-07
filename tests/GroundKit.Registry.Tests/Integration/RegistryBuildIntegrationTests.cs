@@ -12,6 +12,7 @@ using GroundKit.Storage.Sqlite;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using static GroundKit.Registry.Tests.Integration.RegistryBuildAllIntegrationTests;
 
 namespace GroundKit.Registry.Tests.Integration;
 
@@ -57,7 +58,6 @@ public sealed class RegistryBuildIntegrationTests : IDisposable
         var exitCode = await new RegistryApplication(
                 CreatePackageBuilder(),
                 NullLoggerFactory.Instance,
-                new RegistryPublisher(new HttpClient()),
                 new TestHttpClientFactory(new RecordingHttpMessageHandler([]))
             )
             .RunAsync(["validate", "--dir", registryPath]);
@@ -68,6 +68,11 @@ public sealed class RegistryBuildIntegrationTests : IDisposable
     [Fact]
     public async Task Should_Build_Checked_In_Angular_Package_With_Content()
     {
+        // Building a checked-in definition clones its upstream repository, so this test needs the
+        // network switch like every other clone-based test. Without the gate it joins the offline
+        // suite and fails after the five-minute clone timeout whenever the network is unavailable.
+        SkipUnlessNetworkTestsAreEnabled();
+
         var repositoryRoot = FindRepositoryRoot();
         var registryPath = Path.Combine(repositoryRoot, "registry");
         var outputDirectory = Path.Combine(_root, "angular-dist");
@@ -77,27 +82,30 @@ public sealed class RegistryBuildIntegrationTests : IDisposable
         var application = new RegistryApplication(
             provider.GetRequiredService<IDocumentPackageBuilder>(),
             NullLoggerFactory.Instance,
-            new RegistryPublisher(new HttpClient()),
             provider.GetRequiredService<IHttpClientFactory>()
         );
 
+        // Omitting the version selects the newest declared one, which is also what proves the
+        // definition's "tag" is honoured: Angular tags releases without a "v" prefix.
         var exitCode = await application.RunAsync(
             ["build", "angular", "--dir", registryPath, "--output", outputDirectory]
         );
 
         exitCode.ShouldBe(0);
-        var packagePath = Path.Combine(outputDirectory, "angular@latest.db");
+        var packagePath = Path.Combine(outputDirectory, "angular@21.0.3.db");
         File.Exists(packagePath).ShouldBeTrue();
 
         await using var connection = new SqliteConnection($"Data Source={packagePath};Pooling=False");
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT package_id, document_count, chunk_count FROM manifest";
+        command.CommandText =
+            "SELECT package_id, version, document_count, chunk_count FROM manifest";
         await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
         (await reader.ReadAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
         reader.GetString(0).ShouldBe("angular");
-        reader.GetInt32(1).ShouldBeGreaterThan(0);
+        reader.GetString(1).ShouldBe("21.0.3");
         reader.GetInt32(2).ShouldBeGreaterThan(0);
+        reader.GetInt32(3).ShouldBeGreaterThan(0);
     }
 
     [Fact]
@@ -134,7 +142,6 @@ public sealed class RegistryBuildIntegrationTests : IDisposable
         var application = new RegistryApplication(
             provider.GetRequiredService<IDocumentPackageBuilder>(),
             NullLoggerFactory.Instance,
-            new RegistryPublisher(new HttpClient()),
             provider.GetRequiredService<IHttpClientFactory>()
         );
 
