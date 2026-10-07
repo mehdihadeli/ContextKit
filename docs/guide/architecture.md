@@ -58,17 +58,17 @@ flowchart TB
   cli[GroundKit CLI]
   ingestion[Core ingestion and package builder]
   local[(Portable SQLite package)]
-  registry[Registry API]
-  hosted[(Hosted SQLite artifacts)]
+  catalog[(Static catalog index.json)]
+  oci[(OCI packages in GHCR)]
   mcp[MCP stdio or HTTP host]
   ai[AI client]
 
   sources --> cli
   cli --> ingestion
   ingestion --> local
-  cli -->|search or download| registry
-  registry --> hosted
-  hosted -->|import or download| local
+  cli -->|search| catalog
+  catalog -->|manifest digest| oci
+  oci -->|download and verify| local
   local --> mcp
   ai <-->|MCP tools and results| mcp
 ```
@@ -85,7 +85,7 @@ sequenceDiagram
   participant CLI as GroundKit CLI
   participant Core as Core ingestion
   participant Store as SQLite package store
-  participant Registry as Registry API
+  participant Registry as Catalog and OCI registry
   participant MCP as MCP host
   participant AI as AI client
 
@@ -99,9 +99,11 @@ sequenceDiagram
   Store-->>MCP: matching sections and metadata
   MCP-->>AI: MCP response with evidence
 
-  CLI->>Registry: search or download package
-  Registry-->>CLI: package metadata or SQLite artifact
-  CLI->>Store: import downloaded artifact
+  CLI->>Registry: search the catalog for a package
+  Registry-->>CLI: package metadata pinned to a manifest digest
+  CLI->>Registry: download the artifact layer
+  Registry-->>CLI: SQLite artifact
+  CLI->>Store: verify size and SHA-256, then import
 ```
 
 ## Host defaults and logging
@@ -110,10 +112,11 @@ sequenceDiagram
 `AddGroundKitServices()`. It does not configure logging or OpenTelemetry, so it
 can be used by both short-lived command-line processes and long-running hosts.
 
-`GroundKit.ServiceDefaults` is used by the Registry host, not by the CLI. The
-Registry exposes an HTTP API and has a service lifecycle, so it benefits from
-the default health checks, HTTP resilience, service discovery, and
-OpenTelemetry configuration provided by `AddServiceDefaults()`.
+`GroundKit.ServiceDefaults` is used by the MCP host when it runs over HTTP, not
+by the CLI. An HTTP host has a service lifecycle, so it benefits from the
+default health checks, HTTP resilience, service discovery, and OpenTelemetry
+configuration provided by `AddServiceDefaults()`. The stdio MCP host and the CLI
+stay plain console processes.
 
 The CLI uses the console logger directly. Errors are emitted at the default
 level, while `groundkit --verbose <command>` enables informational logs. Logs

@@ -2,7 +2,46 @@
 
 Packages are versioned evidence artifacts. Build or import the package that matches the dependency version used by the project; do not combine multiple versions in one lookup workflow without making that choice explicit.
 
-The repository also includes a declarative starter registry in `registry/`. Its YAML files describe source locations for the curated catalog. `groundkit registry` validates those files and builds packages from them; automatic upstream version discovery remains future work.
+The repository also includes a declarative starter registry in `registry/`. Its YAML files describe source locations for the curated catalog, and a definition may list several versions, each with an explicit `tag`. `groundkit registry validate` checks those files and `build`/`build-all` produce one package per declared version - `registry/npm/angular.yaml` publishes `21.0.3`, `20.3.15`, and `19.2.17`. There is no automatic upstream version discovery: every version to publish is declared in the file.
+
+## Two ways to get a package
+
+Both paths end in the same local SQLite package, so querying is identical. Only
+the origin differs.
+
+**Published package from the registry (GHCR).** The default catalog on GitHub
+Pages maps each package to a GHCR OCI manifest digest, its byte size, and its
+SHA-256. The client resolves the digest, downloads the artifact's single layer,
+verifies size and hash, and imports it. Reads are anonymous.
+
+```bash
+# Discovery, then an exact version
+groundkit search-packages npm react
+groundkit download-package npm react 19.1.0
+
+# Local-first install: registry when it can serve the package
+groundkit install npm/react
+```
+
+**Build from source.** `add` always builds, and `install` falls back to it when
+the registry has no match or cannot be reached. For a curated name the catalog
+entry supplies the GitHub repository and documentation path, which GroundKit
+clones before indexing.
+
+```bash
+# Curated name expanded to a repository + docs path
+groundkit add react
+
+# Explicit source
+groundkit add https://github.com/mattpocock/skills --tag v1.2.3
+groundkit add ./my-library --path docs
+```
+
+A fallback build indexes the catalog repository's newest stable tag and records
+the requested version as metadata only. Build explicitly with `--tag` when the
+package must match a version exactly. Registry errors during download are
+reported instead of retried as a local build, because a catalog entry that
+cannot serve its artifact is broken rather than missing.
 
 ## Sources
 

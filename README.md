@@ -43,8 +43,9 @@ GroundKit is meant to cover the full local documentation workflow:
 - MCP tools for source resolution and docs querying.
 - Context7-style MCP compatibility tools: `get_docs` and `library_catalog`.
 - Curated starter catalog of 19 popular JavaScript and web libraries.
-- Declarative `registry/` starter definitions mirroring the curated catalog.
-- Registry client with package search, versioned download, and local fallback.
+- Declarative `registry/` starter definitions mirroring the curated catalog, including multi-version definitions.
+- Content-addressed OCI publication to GHCR, with digest- and SHA-256-verified consumer installs.
+- Registry client with package search, versioned download, and local build fallback.
 - CLI commands for local package lifecycle, registry workflows, catalog discovery, and MCP serving.
 - Portable package import/export using SQLite `.db` artifacts.
 - Basic OpenTelemetry tracing and metrics hooks.
@@ -443,7 +444,14 @@ or subfolder. It does not currently generate a Google search link.
 
 ### `groundkit install <registry/name|name|source> [version]`
 
-Install with local-first resolution. This is the fallback-capable workflow:
+Install one package, choosing between two ways to obtain it. `install` tries the
+published package first and falls back to building from source.
+
+**Path A: install a prebuilt package from the registry (GHCR).** The default
+catalog is a static `index.json` on GitHub Pages that maps each package to a GHCR
+OCI manifest digest, its byte size, and its SHA-256. `install` resolves the
+digest, downloads the artifact's single layer, verifies size and hash, and
+imports it into the local store. Reads are anonymous, so no credential is needed.
 
 ```bash
 # Search registry only when no matching local package exists
@@ -454,16 +462,144 @@ groundkit install npm/react 19.1.0
 
 # Bare names default to npm
 groundkit install react
+```
 
-# Missing registry package falls back to local catalog/source build
-groundkit install react 19.1.0
+**Path B: build the package from source.** Used when the registry has no match
+or cannot be reached. For a curated name, GroundKit expands the catalog entry to
+its GitHub repository and documentation path, clones that repository, indexes the
+docs, and stores the package locally. A local folder, a Git repository URL,
+`llms.txt` site, or raw page is used as supplied.
+
+```bash
+# Curated name: the fallback clones the catalog repository
+# (react expands to https://github.com/reactjs/react.dev, docs path src/content)
+groundkit install react
+
+# Explicit source instead of a registry name
+groundkit install https://github.com/mattpocock/skills
 ```
 
 Resolution order:
 
 1. Reuse matching package already in local store. No network request.
-2. Search configured registry and import matching `.db` artifact.
-3. If registry has no match or is unavailable, build from the catalog or source locally.
+2. Search configured registry and import the matching artifact.
+3. If the registry has no match or is unavailable, build from the catalog or source locally.
+
+A registry that answers but cannot serve a matched artifact (missing manifest,
+size or checksum mismatch) is reported as an error rather than silently retried
+as a local build, because that is a broken catalog entry and not a missing
+package. Use `download-package` for the strict registry-only path with no
+fallback, and `add` when you always want to build from source.
+
+`--registry-url <URL>` points this command at a different catalog for one
+invocation; `RegistryUrl` and `GROUNDKIT_REGISTRY_URL` do the same persistently.
+
+### Real-world example: install from GHCR, then query locally
+
+This walkthrough uses the public catalog and needs no credentials. The outputs
+below are from an actual run.
+
+**1. Find the version you depend on.** `search-packages` reads catalog metadata
+and downloads nothing.
+
+```bash
+groundkit search-packages npm axios
+```
+
+```text
+┌─────────┬─────────┬───────────────────────────┬───────────┐
+│ Package │ Version │ Description               │ Size      │
+├─────────┼─────────┼───────────────────────────┼───────────┤
+│ axios   │ latest  │ Promise-based HTTP client │ 356,352 B │
+└─────────┴─────────┴───────────────────────────┴───────────┘
+```
+
+**2. Install it.** The catalog lists `npm/axios`, so this is a registry install:
+GroundKit resolves the GHCR manifest digest, downloads the artifact, verifies the
+byte size and SHA-256 recorded in the catalog, and imports it into the local
+store. The command reports the path it wrote. Use `download-package` instead when
+an install must never fall back to a build.
+
+```bash
+groundkit install npm/axios
+```
+
+**3. Confirm what is installed.** This reads the local store only.
+
+```bash
+groundkit list
+```
+
+```text
+                               Installed packages
+┌──────────────┬──────────────┬───────────────┬─────────────────┬──────────────┐
+│ Package      │ Version      │          Size │       Documents │     Sections │
+├──────────────┼──────────────┼───────────────┼─────────────────┼──────────────┤
+│ axios        │ latest       │      348.0 KB │              16 │           80 │
+└──────────────┴──────────────┴───────────────┴─────────────────┴──────────────┘
+┌─Totals───────────────────────────────────────────────────────────────────────┐
+│ Packages   1                                                                 │
+│ Size       348.0 KB                                                          │
+│ Documents  16                                                                │
+│ Sections   80                                                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**4. Query it.** Retrieval is fully local.
+
+```bash
+groundkit query axios "request interceptors"
+```
+
+```json
+{
+  "packageId": "axios",
+  "version": "latest",
+  "totalTokens": 1342,
+  "hits": [
+    {
+      "documentTitle": "interceptors",
+      "sectionTitle": "interceptors",
+      "tokenEstimate": 588,
+      "hasCode": true,
+      "score": 6.6259339612707535
+    }
+  ]
+}
+```
+
+The full response for that query returned four ranked sections:
+
+| # | Document | Section | Tokens | Code | Score |
+| --- | --- | --- | --- | --- | --- |
+| 1 | interceptors | interceptors | 588 | yes | 6.63 |
+| 2 | config_defaults | config_defaults | 38 | no | 4.91 |
+| 3 | instance | Calling the instance with a config object | 197 | yes | 3.86 |
+| 4 | handling_errors | handling_errors | 519 | yes | 3.85 |
+
+**What touched the network**
+
+| Step | Network | Reads |
+| --- | --- | --- |
+| `search-packages` | catalog `index.json` | registry metadata |
+| `install` | catalog + `ghcr.io` | package bytes |
+| `list` | none | local store |
+| `query` | **none** | local SQLite |
+
+Only discovery and download need the network, so an installed package keeps
+working offline and repeat queries cost nothing.
+
+**When a library ships several versions.** `angular` publishes three, so pin the
+one your project uses and select it explicitly when querying:
+
+```bash
+groundkit search-packages npm angular
+groundkit install npm/angular 20.3.15
+groundkit query 'angular@20.3.15' 'component lifecycle'
+```
+
+Use `library@version` once more than one version is installed; a bare name
+selects the newest installed version.
 
 ### `groundkit search-packages <registry> <name> [version]`
 
@@ -612,8 +748,11 @@ groundkit install react 19.1.0
 For `install`, resolution order is:
 
 1. Matching package already exists in the local store. No network request is made.
-2. Registry search finds a matching package. GroundKit downloads the `.db` artifact and imports it locally.
+2. Registry search finds a matching package. GroundKit downloads the artifact, verifies size and SHA-256, and imports it locally.
 3. Registry has no match or cannot be reached. GroundKit builds from the built-in catalog or the supplied local/source input and saves that package locally.
+
+The `groundkit install` section above shows both paths side by side, including
+what a curated-name fallback actually clones.
 
 `download-package` is intentionally strict: it installs the requested registry
 artifact and reports an error if that exact registry download fails. Use
@@ -731,21 +870,36 @@ configured catalog.
 ### GitHub Actions artifact option
 
 The included `Registry Update` workflow runs on schedule and manual dispatch.
-It validates definitions, builds individual `.db` files, and uploads them as a
-GitHub Actions artifact named `groundkit-registry-<run-id>`. Bundles can be built
-locally with the commands above; the workflow does not create them yet.
+It validates definitions, builds one `.db` file per declared version, publishes
+those artifacts to GHCR, and uploads the generated catalog. It does not upload
+the `.db` files as workflow artifacts, and it does not create bundles yet.
 
-Download that artifact from GitHub Actions or with GitHub CLI:
+Two workflow artifacts exist:
+
+| Artifact | Contents | Retention |
+| --- | --- | --- |
+| `groundkit-registry-catalog` | The generated `index.json` that the docs workflow deploys to Pages. | 90 days |
+| `groundkit-registry-build-log-<run-id>` | The `groundkit registry build-all` log, kept for diagnosing failed definitions. | 14 days |
+
+Packages themselves come from GHCR through the catalog, not from a workflow
+artifact:
+
+```bash
+groundkit search-packages npm react
+groundkit install npm/react
+```
+
+Download the catalog when you need the raw JSON:
 
 ```bash
 gh run list --workflow registry-update.yml
-gh run download <run-id> --name groundkit-registry-<run-id> --dir ./registry-download
-groundkit import ./registry-download/react@latest.db
+gh run download <run-id> --name groundkit-registry-catalog --dir ./registry-catalog
 ```
 
-GitHub Actions artifacts are suitable for CI handoff and short-lived builds.
-The workflow currently retains them for 14 days, so use a release asset, bundle
-archive, or HTTP registry for durable distribution.
+For a durable offline copy of the packages, build a bundle locally with
+`groundkit registry build-all` and `groundkit registry bundle` as shown above.
+GitHub Actions artifacts are suitable for CI handoff and short-lived builds, so
+prefer an OCI registry or a bundle archive for distribution.
 
 ### GitHub Container Registry + Pages
 

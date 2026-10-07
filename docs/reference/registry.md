@@ -1,6 +1,17 @@
 # Registry API
 
-GroundKit accepts a small compatible HTTP registry API.
+GroundKit's registry client supports two shapes, and the CLI ships no registry
+server of its own:
+
+- **Static catalog** - the default, and what the public registry uses: one
+  `index.json` mapping every package to an OCI manifest URL, byte size, and
+  SHA-256.
+- **Compatible HTTP API** - the read routes documented below, used when
+  `RegistryUrl` points at an API base URL instead of a `.../index.json` file.
+
+Either way the client resolves one package, downloads it, verifies size and
+SHA-256, and imports it into the local store. Publishing is a maintainer
+operation that goes to an OCI registry such as GHCR.
 
 ## Static catalog option
 
@@ -106,3 +117,26 @@ groundkit registry push-oci --dir registry --output ./dist-packages `
 ```
 
 Consumers verify the manifest digest, blob size, and SHA-256 before import.
+
+## Install paths
+
+`install` tries the registry first and builds from source when the registry has
+no match or cannot be reached.
+
+| Path | Trigger | What happens |
+| --- | --- | --- |
+| Registry | A catalog entry matches the requested registry and name | Resolve the manifest digest, download its single layer, verify size and SHA-256, import |
+| Source build | No catalog match, or the registry is unreachable | Clone the catalog repository and docs path (curated name), or the supplied source, then index and store locally |
+
+A registry that answers but cannot serve a matched artifact is reported as an
+error instead of falling back, because a broken catalog entry is not the same as
+a missing package. `download-package` never falls back; `add` always builds.
+
+A source build indexes the catalog repository's newest stable tag and records
+the requested version as metadata only, so use `add --tag` when a package must
+match a version exactly.
+
+Packages published as several versions have no `latest` tag, so pass an explicit
+version - for example `groundkit install npm/angular 20.3.15`. A catalog entry
+pins the manifest digest, which is why a multi-version package installs without
+one.

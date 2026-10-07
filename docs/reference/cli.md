@@ -140,6 +140,7 @@ For Git repository URLs without `--tag`, GroundKit selects the latest stable tag
 | `export <package-id> <destination>`                                                      | Copy a package artifact                                                                  |
 | `search-packages <registry> <name> [version]`                                            | Search hosted registry                                                                   |
 | `download-package <registry> <name> <version>`                                           | Download and install package                                                             |
+| `install <registry/name\|name\|source> [version]`                                        | Install from the registry, else build from source                                        |
 | `remove <name[@version]>`                                                                | Remove one installed package version                                                     |
 
 `list` renders a package inventory table with package name, version, size, documents, sections, and a totals summary.
@@ -160,12 +161,61 @@ multiple versions are installed, an interactive terminal lists the versions and
 asks you to choose one. Non-interactive runs list the installed versions and
 exit without deleting anything, so removal never guesses.
 
-`install <registry/name|name|source> [version]` resolves a package from the configured registry or catalog, downloads/builds it, and installs it locally. Use `search-packages` to inspect registry versions first.
+### Install a package
 
-The registry endpoint defaults to
-`https://mehdihadeli.github.io/groundkit/registry/index.json`. Override it with
-`--registry-url <URL>`, `RegistryUrl`, or `GROUNDKIT_REGISTRY_URL` to use another
-catalog or API. The command option applies only to the current invocation.
+`install` obtains one package and installs it locally. It tries the published
+registry package first and falls back to building from source.
+
+**Path A: prebuilt package from the registry.** The default catalog is a static
+`index.json` on GitHub Pages that maps each package to a GHCR OCI manifest
+digest, its byte size, and its SHA-256. `install` resolves the digest, downloads
+the artifact's single layer, verifies size and hash, and imports it. Reads are
+anonymous, so no credential is required.
+
+```bash
+# Bare names default to the npm registry
+groundkit install react
+
+# Exact published version
+groundkit install npm/react 19.1.0
+
+# Multi-version packages need an explicit version
+groundkit install npm/angular 20.3.15
+```
+
+**Path B: build from source.** Used when the registry has no match or cannot be
+reached. A curated name is expanded to its catalog repository and documentation
+path and cloned; a local folder, Git repository URL, `llms.txt` site, or raw page
+is used as supplied.
+
+```bash
+# Fallback for a curated name: clones the catalog repository instead of downloading
+groundkit install react
+
+# Explicit source instead of a registry name
+groundkit install https://github.com/mattpocock/skills
+```
+
+Resolution order:
+
+1. Reuse a matching package already in the local store. No network request.
+2. Search the configured registry and import the matching artifact.
+3. Registry has no match or is unreachable: build from the catalog entry or the supplied source.
+
+A registry error while downloading a matched package is reported instead of
+falling back, because a catalog that answers but cannot serve its artifact is a
+broken entry rather than a missing package. `download-package` is the strict
+registry-only path with no fallback at all; `add` always builds from source and
+is the command that supports `--tag` for a reproducible build.
+
+A fallback build indexes the catalog repository's newest stable tag and only
+records the requested version as package metadata. When the local build must
+match a version exactly, build it explicitly with `groundkit add --tag`.
+
+`--registry-url <URL>` applies to `install`, `search-packages`, and
+`download-package` for the current invocation only. `RegistryUrl` in
+`.groundkit/config.json` and `GROUNDKIT_REGISTRY_URL` set it persistently. The
+default endpoint is `https://mehdihadeli.github.io/groundkit/registry/index.json`.
 
 ### Documentation discovery warnings
 
