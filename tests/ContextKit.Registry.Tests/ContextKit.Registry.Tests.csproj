@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ContextKit.Cli\ContextKit.Cli.csproj" />
+    <ProjectReference Include="..\..\src\ContextKit.Registry\ContextKit.Registry.csproj" />
+  </ItemGroup>
+
+</Project>

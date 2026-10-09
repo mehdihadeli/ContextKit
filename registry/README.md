@@ -1,8 +1,8 @@
 # Community Registry
 
-Registry definitions describe where documentation comes from and how to build a GroundKit package. Each YAML file defines an unversioned source or one or more versioned sources.
+Registry definitions describe where documentation comes from and how to build a ContextKit package. Each YAML file defines an unversioned source or one or more versioned sources.
 
-GroundKit consumes packages through a static catalog, a direct package URL, or a
+ContextKit consumes packages through a static catalog, a direct package URL, or a
 local file. The [Registry Update workflow](../.github/workflows/registry-update.yml)
 validates definitions, builds packages, and publishes every package as a
 content-addressed OCI artifact in the GitHub Container Registry (`ghcr.io`). The
@@ -33,7 +33,7 @@ directory. The manager directory becomes the registry name.
 ### What is a package?
 
 A registry package is a versioned, searchable documentation bundle for one
-library or module. The registry definition tells GroundKit where to get the
+library or module. The registry definition tells ContextKit where to get the
 documentation and which files to ingest. The registry builder turns that
 source into a SQLite package containing document text, chunks, metadata, and
 search indexes. MCP clients download these packages instead of cloning source
@@ -169,10 +169,10 @@ registry hosting or publishing credentials.
 4. Open a pull request including the source URL, selected version or ref, and build results. Maintainers review before publishing.
 
 ```bash
-groundkit registry validate --dir registry
-groundkit registry build react --dir registry --output ./dist-packages
-groundkit import ./dist-packages/react@latest.db
-groundkit inspect react
+ck registry validate --dir registry
+ck registry build react --dir registry --output ./dist-packages
+ck import ./dist-packages/react@latest.db
+ck inspect react
 ```
 
 Replace `react` with your package name and `latest` with the built version.
@@ -189,14 +189,14 @@ then generate a catalog that addresses those artifacts by digest.
 
 ```bash
 # 1. Build, then push. Writes the digest-pinned reference map consumed in step 2.
-groundkit registry build-all --dir registry --output ./dist-packages
+ck registry build-all --dir registry --output ./dist-packages
 GROUNDKIT_OCI_USERNAME=<user> GROUNDKIT_OCI_TOKEN=<token> \
-  groundkit registry push-oci --dir registry --output ./dist-packages \
+  ck registry push-oci --dir registry --output ./dist-packages \
   --oci-repository ghcr.io/<owner>/<repo> \
   --oci-references ./oci-references.json
 
 # 2. Generate the static catalog that consumers read.
-groundkit registry catalog-index --dir registry --output ./dist-packages \
+ck registry catalog-index --dir registry --output ./dist-packages \
   --destination ./dist-catalog --oci-references ./oci-references.json
 ```
 
@@ -234,7 +234,7 @@ the real CLI:
 
 ```bash
 (cd ./dist-catalog && python3 -m http.server 8123 --bind 127.0.0.1 &)
-groundkit install npm/react 18.0.0 --registry-url http://127.0.0.1:8123/index.json
+ck install npm/react 18.0.0 --registry-url http://127.0.0.1:8123/index.json
 ```
 
 CI does exactly this after pushing to GHCR. To run the same scenario as a test
@@ -245,12 +245,12 @@ GROUNDKIT_OCI_TESTS=1 \
 GROUNDKIT_OCI_TEST_REPOSITORY=ghcr.io/OWNER/groundkit-test \
 GROUNDKIT_OCI_USERNAME=OWNER \
 GROUNDKIT_OCI_TOKEN=<token with write:packages and delete:packages> \
-  dotnet test --project tests/GroundKit.Registry.Tests --filter-class \
-    "GroundKit.Registry.Tests.Integration.GhcrPublishIntegrationTests"
+  dotnet test --project tests/ContextKit.Registry.Tests --filter-class \
+    "ContextKit.Registry.Tests.Integration.GhcrPublishIntegrationTests"
 ```
 
 Each run publishes a uniquely versioned artifact, installs it back through
-`groundkit install`, and deletes the manifest again.
+`ck install`, and deletes the manifest again.
 
 ## Included definitions
 

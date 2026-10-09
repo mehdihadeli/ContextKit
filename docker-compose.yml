@@ -14,7 +14,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mcp
-    entrypoint: ["dotnet", "GroundKit.Mcp.dll"]
+    entrypoint: ["dotnet", "ContextKit.Mcp.Host.dll"]
     environment:
       GROUNDKIT_HOME: /data
     stdin_open: true

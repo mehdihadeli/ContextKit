@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="NSubstitute" />
+    <Using Include="NSubstitute" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ContextKit.Mcp\ContextKit.Mcp.csproj" />
+    <ProjectReference Include="..\..\src\ContextKit.Mcp.Host\ContextKit.Mcp.Host.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -12,4 +12,9 @@
   <ItemGroup>
     <PackageReference Include="Nerdbank.GitVersioning" PrivateAssets="all" />
   </ItemGroup>
+
+  <ItemGroup Condition="'$(GroundKitProviderReleaseTag)' != ''">
+    <AssemblyMetadata Include="GroundKitProviderReleaseTag" Value="$(GroundKitProviderReleaseTag)" />
+    <AssemblyMetadata Include="GroundKitProviderVersion" Value="$(GroundKitProviderVersion)" />
+  </ItemGroup>
 </Project>

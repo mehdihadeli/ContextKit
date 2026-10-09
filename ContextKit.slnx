@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ContextKit.Abstractions/ContextKit.Abstractions.csproj" />
+    <Project Path="src/ContextKit.Core/ContextKit.Core.csproj" />
+    <Project Path="src/ContextKit.Hosting/ContextKit.Hosting.csproj" />
+    <Project Path="src/ContextKit.ServiceDefaults/ContextKit.ServiceDefaults.csproj" />
+    <Project Path="src/ContextKit.Storage.Sqlite/ContextKit.Storage.Sqlite.csproj" />
+    <Project Path="src/ContextKit.Cli/ContextKit.Cli.csproj" />
+    <Project Path="src/ContextKit.Mcp/ContextKit.Mcp.csproj" />
+    <Project Path="src/ContextKit.Mcp.Host/ContextKit.Mcp.Host.csproj" />
+    <Project Path="src/ContextKit.Registry/ContextKit.Registry.csproj" />
+    <Project Path="src/ContextKit.Semantic.Onnx/ContextKit.Semantic.Onnx.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ContextKit.Core.Tests/ContextKit.Core.Tests.csproj" />
+    <Project Path="tests/ContextKit.Storage.Sqlite.Tests/ContextKit.Storage.Sqlite.Tests.csproj" />
+    <Project Path="tests/ContextKit.Cli.Tests/ContextKit.Cli.Tests.csproj" />
+    <Project Path="tests/ContextKit.Mcp.Tests/ContextKit.Mcp.Tests.csproj" />
+    <Project Path="tests/ContextKit.Registry.Tests/ContextKit.Registry.Tests.csproj" />
+  </Folder>
+</Solution>

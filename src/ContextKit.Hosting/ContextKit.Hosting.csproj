@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\ContextKit.Core\ContextKit.Core.csproj" />
+    <ProjectReference Include="..\ContextKit.Mcp\ContextKit.Mcp.csproj" />
+    <ProjectReference Include="..\ContextKit.ServiceDefaults\ContextKit.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\ContextKit.Storage.Sqlite\ContextKit.Storage.Sqlite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

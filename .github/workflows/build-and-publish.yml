@@ -34,13 +34,13 @@ jobs:
         run: dotnet tool restore
 
       - name: Restore
-        run: dotnet restore GroundKit.slnx
+        run: dotnet restore ContextKit.slnx
 
       - name: Build
-        run: dotnet build GroundKit.slnx --configuration Release --no-restore
+        run: dotnet build ContextKit.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test --solution GroundKit.slnx --configuration Release --no-build
+        run: dotnet test --solution ContextKit.slnx --configuration Release --no-build
 
       - name: Run Docker MCP smoke tests
         run: bash scripts/test-mcp-docker.sh
@@ -101,10 +101,21 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore
-        run: dotnet restore src/GroundKit.Cli/GroundKit.Cli.csproj
+        run: dotnet restore src/ContextKit.Cli/ContextKit.Cli.csproj
 
       - name: Pack
-        run: dotnet pack src/GroundKit.Cli/GroundKit.Cli.csproj --configuration Release --no-restore --output artifacts -p:PublicRelease=true -p:PackageVersion=${{ needs['calculate-version'].outputs.version }}
+        run: >-
+          dotnet pack src/ContextKit.Cli/ContextKit.Cli.csproj --configuration Release --no-restore --output artifacts
+          -p:PublicRelease=true -p:PackageVersion=${{ needs['calculate-version'].outputs.version }}
+          -p:GroundKitProviderVersion=${{ needs['calculate-version'].outputs.version }}
+          -p:GroundKitProviderReleaseTag=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs['calculate-version'].outputs.version) }}
+
+      - name: Pack MCP host
+        run: >-
+          dotnet pack src/ContextKit.Mcp.Host/ContextKit.Mcp.Host.csproj --configuration Release --output artifacts
+          -p:PublicRelease=true -p:PackageVersion=${{ needs['calculate-version'].outputs.version }}
+          -p:GroundKitProviderVersion=${{ needs['calculate-version'].outputs.version }}
+          -p:GroundKitProviderReleaseTag=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs['calculate-version'].outputs.version) }}
 
       - name: Publish to NuGet.org
         continue-on-error: true
@@ -117,19 +128,25 @@ jobs:
           for runtime in linux-x64 osx-x64 osx-arm64 win-x64; do
             publish_dir="release/$runtime"
             mkdir -p "$publish_dir"
-            dotnet publish src/GroundKit.Cli/GroundKit.Cli.csproj \
+            dotnet publish src/ContextKit.Cli/ContextKit.Cli.csproj \
               --configuration Release \
               --runtime "$runtime" \
               --self-contained true \
               --output "$publish_dir" \
               -p:PublishSingleFile=true \
               -p:IncludeNativeLibrariesForSelfExtract=true \
-              -p:PublishTrimmed=false
+              -p:PublishTrimmed=false \
+              -p:GroundKitProviderVersion="${{ needs['calculate-version'].outputs.version }}" \
+              -p:GroundKitProviderReleaseTag="${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs['calculate-version'].outputs.version) }}"
             if [[ "$runtime" == win-* ]]; then
-              (cd "$publish_dir" && zip -q "../../artifacts/groundkit-$runtime.zip" GroundKit.Cli.exe)
+              (cd "$publish_dir" && zip -q "../../artifacts/groundkit-$runtime.zip" ContextKit.Cli.exe)
             else
               tar -czf "artifacts/groundkit-$runtime.tar.gz" -C "$publish_dir" GroundKit.Cli
             fi
+            bash scripts/package-semantic-provider.sh \
+              --runtime "$runtime" \
+              --output artifacts \
+              --version "${{ needs['calculate-version'].outputs.version }}"
           done
 
       - name: Publish matching Release Drafter draft

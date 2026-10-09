@@ -1,7 +1,7 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
-  title: "GroundKit",
+  title: "ContextKit",
   description: "Local-first documentation grounding for AI agents",
   base: process.env.GITHUB_ACTIONS
     ? `/${process.env.GITHUB_REPOSITORY?.split("/")[1] ?? "groundkit"}/`
@@ -24,6 +24,7 @@ export default defineConfig({
             { text: "Quickstart", link: "/guide/quickstart" },
             { text: "Architecture", link: "/guide/architecture" },
             { text: "Grounding model", link: "/guide/grounding" },
+            { text: "Search modes", link: "/guide/grounding#choosing-a-search-mode" },
             { text: "Release versioning", link: "/guide/versioning" },
           ],
         },
@@ -31,6 +32,7 @@ export default defineConfig({
           text: "Connect an agent",
           items: [
             { text: "MCP setup", link: "/guide/mcp" },
+            { text: "Question-based search", link: "/guide/question-search" },
             { text: "Package workflow", link: "/guide/packages" },
             { text: "Integrations", link: "/integrations" },
           ],
@@ -65,7 +67,7 @@ export default defineConfig({
     search: { provider: "local" },
     footer: {
       message: "Build once. Query locally. Ground with sources.",
-      copyright: "GroundKit",
+      copyright: "ContextKit",
     },
   },
 });

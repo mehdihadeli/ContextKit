@@ -1,10 +1,10 @@
 ---
 layout: home
-title: GroundKit
+title: ContextKit
 titleTemplate: Local-first documentation grounding
 description: Build versioned documentation packages once. Give AI agents precise local context through MCP.
 hero:
-  name: GroundKit
+  name: ContextKit
   text: Documentation that stays close to your code
   tagline: Build versioned docs into portable SQLite packages. Query them through MCP with no cloud dependency on the hot path.
   actions:
@@ -23,12 +23,24 @@ features:
     details: SQLite FTS5 and BM25 return focused sections with token budgets and relevance controls.
   - icon: "03"
     title: Ground agents
-    details: Expose precise documentation through the standard Model Context Protocol and Microsoft Agent Framework.
+    details: Expose documentation through standard MCP tools with structured results and deterministic text formatting.
 ---
 
 <div class="home-note">
   <strong>Core promise:</strong> exact library version, local source, inspectable retrieval.
 </div>
+
+## Install
+
+Build a package once, store it locally, then query it from your agent. Nothing
+on the query path calls a hosted documentation service.
+
+```bash
+dotnet tool install --global ContextKit   # installs the `ck` command
+ck install npm/react              # prebuilt package from the registry
+ck add ./my-library --path docs   # or build one from source
+ck query react "useEffect cleanup"
+```
 
 ## Choose your starting point
 
@@ -73,6 +85,6 @@ Documentation lookup should disappear into the development loop. Add packages du
 
 ## One server, any MCP client
 
-GroundKit speaks standard stdio MCP and Streamable HTTP. Connect it to your editor, agent host, or shared container, then use the same package store from interactive sessions and automation.
+ContextKit speaks standard stdio MCP and Streamable HTTP. Connect it to your editor, agent host, or shared container, then use the same package store from interactive sessions and automation.
 
 [Configure an integration](/integrations) <span class="home-arrow">-></span>
