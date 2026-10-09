@@ -4,6 +4,6 @@ param(
     [string[]] $GroundKitArgs
 )
 
-$project = Join-Path $PSScriptRoot "src/GroundKit.Cli/GroundKit.Cli.csproj"
+$project = Join-Path $PSScriptRoot "src/ContextKit.Cli/ContextKit.Cli.csproj"
 dotnet run --project $project --no-restore -v:q -- @GroundKitArgs
 exit $LASTEXITCODE

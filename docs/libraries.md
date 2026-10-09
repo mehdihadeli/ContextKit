@@ -44,6 +44,12 @@ description: Browse the curated library catalog and build local documentation pa
   </div>
 
   <div class="library-note">
+    <strong>Prefer not to build?</strong>
+    <span>Every curated source is also published as a prebuilt package. <code>ck install npm/react</code> downloads it, verifies the size and SHA-256 from the catalog, and imports it into the local store.</span>
+    <a href="/reference/registry">Registry reference <span>-&gt;</span></a>
+  </div>
+
+  <div class="library-note">
     <strong>Need another source?</strong>
     <span>Build any Git repository, local folder, llms.txt site, or raw page with the same package workflow.</span>
     <a href="/guide/packages">Review source types <span>-&gt;</span></a>

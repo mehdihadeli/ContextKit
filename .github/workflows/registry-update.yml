@@ -33,17 +33,17 @@ jobs:
           global-json-file: global.json
 
       - name: Restore solution
-        run: dotnet restore GroundKit.slnx
+        run: dotnet restore ContextKit.slnx
 
       - name: Build solution
-        run: dotnet build GroundKit.slnx --no-restore --configuration Release
+        run: dotnet build ContextKit.slnx --no-restore --configuration Release
 
       - name: Run tests
         env:
           # Offline only. The live clone/publish checks get their own steps below, targeted with
           # --filter-class so the slow ones run once instead of everywhere.
           GROUNDKIT_NETWORK_TESTS: "0"
-        run: dotnet test --solution GroundKit.slnx --no-build --configuration Release
+        run: dotnet test --solution ContextKit.slnx --no-build --configuration Release
 
       # The live registry checks run here rather than in build-and-publish so that a third party
       # being down cannot fail a pull request. ttl.sh needs no credentials, so nothing has to be
@@ -52,23 +52,23 @@ jobs:
         env:
           GROUNDKIT_NETWORK_TESTS: "1"
         run: |
-          dotnet test --project tests/GroundKit.Registry.Tests --no-build --configuration Release \
+          dotnet test --project tests/ContextKit.Registry.Tests --no-build --configuration Release \
             --filter-class "GroundKit.Registry.Tests.Integration.TtlShPublishIntegrationTests"
 
       - name: Verify add against live sites
         env:
           GROUNDKIT_NETWORK_TESTS: "1"
         run: |
-          dotnet test --project tests/GroundKit.Cli.Tests --no-build --configuration Release \
+          dotnet test --project tests/ContextKit.Cli.Tests --no-build --configuration Release \
             --filter-class "GroundKit.Tests.Integration.AddFromWebsiteIntegrationTests" \
             --filter-class "GroundKit.Tests.Integration.AddWithGitRepositoryIntegrationTests" \
             --filter-class "GroundKit.Tests.Integration.AddFromDirectoryIntegrationTests"
 
       - name: Validate and build registry definitions
         run: |
-          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+          dotnet run --project src/ContextKit.Cli --no-build --configuration Release -- \
             registry validate --dir registry
-          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+          dotnet run --project src/ContextKit.Cli --no-build --configuration Release -- \
             registry build-all --dir registry --output ./dist-packages --allow-failures \
             | tee registry-build.log
           failures="$(sed -n 's/^RegistryBuildFailures=\([0-9]\+\)$/\1/p' registry-build.log | tail -1)"
@@ -97,7 +97,7 @@ jobs:
         run: |
           # GHCR rejects uppercase characters in the repository path.
           oci_repository="ghcr.io/${GITHUB_REPOSITORY,,}"
-          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+          dotnet run --project src/ContextKit.Cli --no-build --configuration Release -- \
             registry push-oci --dir registry --output ./dist-packages \
             --oci-repository "$oci_repository" \
             --oci-references ./oci-references.json
@@ -166,7 +166,7 @@ jobs:
 
       - name: Generate static registry catalog
         run: |
-          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+          dotnet run --project src/ContextKit.Cli --no-build --configuration Release -- \
             registry catalog-index --dir registry --output ./dist-packages \
             --destination ./dist-catalog \
             --oci-references ./oci-references.json
@@ -216,7 +216,7 @@ jobs:
             exit 1
           fi
           echo "Installing $reference $version from $catalog_url"
-          dotnet run --project src/GroundKit.Cli --no-build --configuration Release -- \
+          dotnet run --project src/ContextKit.Cli --no-build --configuration Release -- \
             install "$reference" "$version" --registry-url "$catalog_url"
           echo "::notice::Verified $reference $version installs from the published catalog"
 

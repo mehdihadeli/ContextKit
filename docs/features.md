@@ -1,7 +1,7 @@
 ---
 title: Features
 titleTemplate: Local-first documentation workflows
-description: See how GroundKit builds, searches, connects, and shares versioned documentation packages.
+description: See how ContextKit builds, searches, connects, and shares versioned documentation packages.
 ---
 
 <div class="feature-page">
@@ -13,7 +13,7 @@ description: See how GroundKit builds, searches, connects, and shares versioned 
   <div class="feature-stats">
     <span><strong>SQLite</strong> portable packages</span>
     <span><strong>FTS5</strong> full-text retrieval</span>
-    <span><strong>stdio</strong> MCP transport</span>
+    <span><strong>stdio</strong> and <strong>HTTP</strong> MCP transports</span>
   </div>
 </div>
 
@@ -37,7 +37,7 @@ description: See how GroundKit builds, searches, connects, and shares versioned 
   </div>
   <div class="feature-panel">
     <div class="panel-label">BUILD A PACKAGE</div>
-    <div class="feature-code">$ dotnet run --project<br>src/GroundKit.Cli -- add react<br><br>OK source detected: git<br>OK sections extracted: 1,842<br>OK package: react@19.1.0.db</div>
+    <div class="feature-code">$ ck add react<br><br>OK source detected: git<br>OK sections extracted: 1,842<br>OK package: react@19.1.0.db</div>
 
   </div>
 </div>
@@ -68,13 +68,13 @@ description: See how GroundKit builds, searches, connects, and shares versioned 
     <p>Expose the local package store through standard stdio MCP. Editors and agent hosts can resolve sources, retrieve docs, and discover packages without a custom integration.</p>
     <ul class="feature-list">
       <li>Works with MCP-compatible clients</li>
-      <li>Microsoft Agent Framework formats responses</li>
+      <li>Structured results with deterministic text formatting</li>
       <li>No cloud account or API key required</li>
     </ul>
   </div>
   <div class="feature-panel">
     <div class="panel-label">MCP CONFIGURATION</div>
-    <div class="feature-code">{<br>&nbsp;&nbsp;"servers": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"groundkit": {<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"type": "stdio",<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"command": "dotnet",<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"args": ["run", "--project",<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"src/GroundKit.Mcp"]<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;}<br>}</div>
+    <div class="feature-code">{<br>&nbsp;&nbsp;"servers": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"groundkit": {<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"type": "stdio",<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"command": "ck",<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"args": ["mcp"]<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;}<br>}</div>
   </div>
 </div>
 

@@ -1,692 +1,495 @@
-# GroundKit
-
-Release versioning uses NBGV commit-height previews and tag-gated RC and stable releases. See the [release versioning guide](docs/guide/versioning.md) for the version contract, helper commands, and CI behavior.
-
-GroundKit is a local-first documentation MCP for AI agents, built in .NET.
-
-GroundKit builds documentation once, stores it as portable local packages, and serves it to AI agents through MCP without depending on a hosted documentation service.
-
-The core model is simple:
-
-- Ingest docs from a source such as a git repo, local folder, `llms.txt` site, or raw page.
-- Normalize and chunk that content into a retrieval-friendly package.
-- Store the package as a local SQLite `.db` file.
-- Let MCP clients query those local packages repeatedly with low latency.
-
-## Product direction
-
-GroundKit is meant to cover the full local documentation workflow:
-
-1. Detect a documentation source from a local folder, git repo, `llms.txt` site, or raw page.
-2. Build a portable local package once for a specific source snapshot.
-3. Store that package in SQLite with retrieval-friendly chunk metadata.
-4. Expose MCP tools that let an agent resolve sources and query focused sections.
-5. Keep the common path fully local after ingestion.
-6. Add enough CLI and lifecycle tooling that teams can build, install, update, inspect, and share packages.
-
-## Coverage map
-
-### Implemented now
-
-- .NET 10 solution split into ingestion, storage, MCP, observability, app host, and tests.
-- Local directory ingestion.
-- Git repository ingestion through clone-to-temp build flow.
-- Automatic latest stable Git tag selection for repository sources, with explicit
-  `--tag` and interactive `--choose-tag` support.
-- `llms.txt` and `llms-full.txt` ingestion.
-- Raw page ingestion with HTML-to-text fallback handling.
-- Automatic source detection for local folder, git repo, `llms.txt`, and raw page inputs.
-- Package build pipeline producing manifests, documents, chunks, fingerprints, and warnings.
-- SQLite-backed package store.
-- Lexical retrieval with max token budget, max hits, and relative score cutoff.
-- MCP server with stdio and Streamable HTTP transports.
-- MCP tools for source resolution and docs querying.
-- Context7-style MCP compatibility tools: `get_docs` and `library_catalog`.
-- Curated starter catalog of 19 popular JavaScript and web libraries.
-- Declarative `registry/` starter definitions mirroring the curated catalog.
-- Registry client with package search, versioned download, and local fallback.
-- CLI commands for local package lifecycle, registry workflows, catalog discovery, and MCP serving.
-- Portable package import/export using SQLite `.db` artifacts.
-- Basic OpenTelemetry tracing and metrics hooks.
-
-### Next to build
-
-- Better docs-root discovery and stronger repository heuristics.
-- Smarter markdown and HTML chunking closer to docs structure instead of simple section splitting only.
-- Adjacent-chunk merge in retrieval so agents get coherent sections rather than isolated fragments.
-- Package metadata inspection and health diagnostics.
-- Narrow integration and unit tests around ingestion, storage, and MCP tool contracts.
-
-### Out of scope for current phase
-
-- Team sync service.
-- Embeddings or vector search.
-- Semantic or graph retrieval.
-- Multi-tenant or cloud deployment concerns.
-
-## Current architecture
-
-Current repo shape already matches the local-first core:
-
-- Ingestion builds packages from source material.
-- Storage persists package data under `.groundkit/packages` or `GROUNDKIT_HOME/packages`.
-- MCP exposes query tools over stdio.
-- Observability keeps the core path measurable.
-
-That means the project is past the idea stage. Main gap now is not core direction, but finishing the developer workflow around package lifecycle and tightening retrieval quality.
-
-## How the MCP server works
-
-GroundKit follows a two-phase model:
-
-1. Build a docs package once.
-2. Store it locally as SQLite.
-3. Let the MCP server answer future agent queries from local data instead of a hosted docs API.
-
-In other words, ingestion happens ahead of time and retrieval happens on demand.
-
-### Runtime flow
-
-When you run `groundkit mcp`, the MCP host starts a stdio MCP server by default. Pass `--http [port]` to expose the same tools through Streamable HTTP at `/mcp`. The MCP registration comes from the `GroundKit.Mcp` assembly, where tool methods are discovered and exposed through the Model Context Protocol server SDK.
-
-At runtime the agent talks to GroundKit over stdio, not HTTP. The server does not fetch the internet during the normal query path. It assumes packages have already been built and installed locally under the package store directory.
-
-That keeps the hot path small:
-
-1. MCP client sends a tool call.
-2. GroundKit loads package metadata or opens a local SQLite package.
-3. GroundKit returns structured results and a compact readable summary.
-
-### Tool surface
-
-Current MCP surface is intentionally small:
-
-- `resolve-source`: finds installed packages by package id or display name.
-- `query-docs`: searches one installed package for relevant sections under a token budget.
-
-This keeps the server focused on retrieval. Package creation, refresh, import, and export happen in the CLI workflow, while the MCP layer serves already-installed packages.
-
-### What happens on `resolve-source`
-
-`resolve-source` loads the installed package list from the local package store and performs simple lexical matching against package id and display name. It scores exact matches highest, then partial matches, then term overlap.
-
-The result is returned in two forms:
-
-- Structured JSON payload for MCP-aware clients.
-- Concise plain-text summary for agents that benefit from readable tool output.
-
-That dual-output pattern is important in this repo: tool calls return machine-readable data, but also a compact human-readable rendering generated by the local response formatter.
-
-### What happens on `query-docs`
-
-`query-docs` takes a package id and a topic. The package store opens the package's SQLite database and runs an FTS5 search against indexed chunk content.
-
-Current retrieval path is:
-
-1. Build FTS query from topic text.
-2. Search the local SQLite FTS table.
-3. Rank hits with BM25 weighting.
-4. Drop weak results using a relative score cutoff.
-5. Trim the final result set to the requested token budget.
-6. Return both structured hit data and concise plain-text summaries.
-
-This keeps the retrieval path fast and fully local. Expensive work belongs in package build time, not in every MCP call.
-
-### Why response formatting is split from retrieval
-
-This repo separates retrieval from presentation.
-
-- `IPackageStore` and the SQLite store own package lookup and search.
-- MCP tools own argument validation and tool contracts.
-- `GroundKitToolResponseAgent` converts structured payloads into compact plain text.
-
-That means the MCP layer can serve both structured clients and text-oriented agents without changing the retrieval engine.
-
-### End-to-end mental model
-
-You can think of GroundKit as two phases:
-
-1. Offline or pre-query phase: `add` builds a package from git, local docs, `llms.txt`, or a raw page and stores it as a local SQLite `.db` file.
-2. Online query phase: `groundkit mcp` exposes MCP tools that resolve packages and query those local SQLite packages with no hosted dependency.
-
-That is the core architectural idea behind GroundKit: build once, query locally many times.
-
-## CLI reference
-
-Run GroundKit with `groundkit <command>`.
-
-### Short aliases
-
-GroundKit commands also support short names through Spectre.Console.Cli.
-
-Run `groundkit --help`, `groundkit registry --help`, or `groundkit mcp --help`
-to see the same aliases and example invocations in built-in help.
-
-| Command            | Short alias(es) |
-| ------------------ | --------------- |
-| `add`              | `a`             |
-| `import`           | `im`            |
-| `export`           | `ex`, `exp`     |
-| `list`             | `l`, `ls`       |
-| `inspect`          | `ins`, `info`   |
-| `query`            | `q`             |
-| `refresh`          | `rf`, `ref`     |
-| `remove`           | `rm`, `del`     |
-| `catalog`          | `c`, `cat`      |
-| `search-packages`  | `sp`, `search`  |
-| `download-package` | `dp`, `dl`      |
-| `install`          | `i`             |
-
-Common options also have short forms:
-
-| Option          | Short alias |
-| --------------- | ----------- |
-| `--path`        | `-p`        |
-| `--name`        | `-n`        |
-| `--pkg-version` | `-v`        |
-| `--save`        | `-s`        |
-| `--tag`         | `-t`        |
-| `--choose-tag`  | `-c`        |
-
-During development, this repository includes local `groundkit` wrappers in the
-repository root. Add the repository root to `PATH` once per shell session, then
-use the same `groundkit` command shown throughout this README and the docs.
-
-### Development mode
-
-Development mode means running the current source tree directly instead of an
-installed .NET tool package. The repository root includes small launcher
-scripts named `groundkit`, `groundkit.cmd`, and `groundkit.ps1` that forward to
-`src/GroundKit.Cli/GroundKit.Cli.csproj` with `dotnet run`.
-
-That gives contributors one command shape everywhere:
-
-- `groundkit ...` during development, after adding the repo root to `PATH`
-- `groundkit ...` after installing or publishing the tool
-
-Shells pick the matching launcher automatically:
-
-- Git Bash or other POSIX shells use `./groundkit`
-- `cmd.exe` uses `groundkit.cmd`
-- PowerShell can use `groundkit.cmd` from `PATH` or `./groundkit.ps1` directly
-
-The maintainer CLI is available as the native `groundkit registry` subcommand.
-`GroundKit.Registry` supplies the command library; `GroundKit.Cli` hosts its
-commands in the same process during development and in the installed tool.
+# ContextKit
+
+**Documentation packages your AI agent can hold locally — no hosted docs API on the hot path.**
+
+[![NuGet](https://img.shields.io/nuget/v/ContextKit.svg)](https://www.nuget.org/packages/ContextKit) [![Build](https://github.com/mehdihadeli/groundkit/actions/workflows/build-and-publish.yml/badge.svg)](https://github.com/mehdihadeli/groundkit/actions/workflows/build-and-publish.yml)
+
+ContextKit is a .NET CLI and MCP server. It turns documentation into a portable
+package, keeps that package in a local store, and answers agent queries from
+SQLite full-text search. You build a package once for a specific source
+snapshot; after that, queries cost nothing but disk reads.
+
+It exists because the usual arrangement — agent fetches a docs website, parses
+HTML, chunks it on the fly — is slow, breaks when the site changes, and keeps
+paying network and token costs for the same pages. ContextKit moves that work to
+build time and keeps retrieval local.
+
+| | |
+| --- | --- |
+| Runtime | .NET 10 |
+| Transport | MCP over stdio (default) and Streamable HTTP |
+| Storage | One SQLite `.db` per package |
+| Retrieval | FTS5/BM25 by default; optional local semantic or hybrid search |
+| Sources | Git repo, local folder, `llms.txt` site, raw page, existing `.db` |
+| Install | `dotnet tool install --global ContextKit` |
+
+## The two phases
+
+ContextKit is easier to reason about as two separate stages.
+
+**Build (offline).** `ck add` resolves a source, discovers the docs
+folder, extracts text, splits it into sections, fingerprints the content, and
+writes a single SQLite file. Nothing about the query path is decided here except
+what the package contains.
+
+**Query (on demand).** `ck mcp` starts a server that looks up installed
+packages and searches them. Queries are answered from disk; the only time the
+server reaches the network is when you ask a question about a package that is
+not installed yet and it is published — see `ask-docs` below.
+
+```mermaid
+flowchart LR
+  src["git repo<br/>local folder<br/>llms.txt site<br/>raw page"] --> build["ck add"]
+  build --> db[("SQLite package")]
+  db --> store[("package store")]
+  store --> server["ck mcp"]
+  server --> agent["MCP client"]
+  oci["GHCR OCI artifact<br/>+ catalog index"] -.->|ck install| store
+```
+
+The dotted edge is optional: a package can also arrive prebuilt from a registry
+instead of being built locally.
+
+## Local by design
+
+ContextKit runs on your machine and answers from a file it keeps there, not from
+a hosted service. That changes what retrieval costs and what can go wrong with
+it.
+
+- **No round trip per question** — FTS5 searches the local SQLite file directly,
+  so latency is disk speed rather than network speed.
+- **Nothing to authenticate** — Queries need no API key, account, or hosted
+  service, and query text never leaves the machine.
+- **Works disconnected** — A plane, a coffee shop, or a corporate firewall that
+  blocks a vendor's docs site changes nothing.
+- **Costs the same every time** — No subscription, no rate limit, no per-query
+  retrieval charge. The same package returns the same ranking.
+- **Can't be withdrawn** — The evidence is a file you own, so an upstream
+  retrieval API changing or shutting down does not affect your agents.
+
+Only three operations touch the network: catalog search, registry download, and
+a build from a remote source. Optional semantic setup also downloads its provider
+and model explicitly; embedding generation and semantic queries stay local.
+
+## Getting started
+
+Requirements: the .NET 10 SDK, and Git if you plan to build from a repository.
+
+Install the CLI:
 
 ```bash
-export PATH="$PWD:$PATH"
-groundkit list
+dotnet tool install --global ContextKit    # tool command: ck
+```
+
+New releases use the `ContextKit` package identity. Existing installations of
+the former `GroundKit` package do not change automatically; install `ContextKit`
+and update shell commands and MCP client configurations to `ck`.
+
+Working from a clone instead? The repository root includes launchers for the
+same command under both names — `ck`, `ck.ps1`, and `ck.cmd`, plus the
+long-form `groundkit` variants — that run the source tree through `dotnet run`.
+Put the root on `PATH` for the session:
+
+```bash
+export PATH="$PWD:$PATH"        # bash and other POSIX shells
 ```
 
 ```powershell
-$env:Path = "$PWD;$env:Path"
-groundkit list
+$env:Path = "$PWD;$env:Path"    # PowerShell
 ```
 
-After publishing or installing the .NET tool, the same command name resolves to
-the installed tool instead of the repository wrapper. Running GroundKit without
-a command prints the command list.
-
-Install GroundKit as a global .NET tool:
-
-```powershell
-dotnet tool install --global GroundKit
-groundkit list
-```
-
-For a locally built package, install from its package directory:
-
-```powershell
-dotnet pack src/GroundKit.Cli -c Release
-dotnet tool install --global --add-source ./src/GroundKit.Cli/bin/Release GroundKit
-```
-
-Update a NuGet installation with `dotnet tool update --global GroundKit`.
-Update a local package installation with `dotnet tool update --global
---add-source ./src/GroundKit.Cli/bin/Release GroundKit`.
-
-```powershell
-groundkit list
-groundkit inspect react
-groundkit query react "useEffect cleanup"
-```
-
-### `groundkit add <source>`
-
-Build and install a package from source. Source type is detected automatically.
-Use this for libraries missing from the registry, private or internal docs, or
-when you need to build from a specific source yourself.
-
-The examples below use the installed `groundkit` executable.
-
-**From the starter catalog:**
+Then get one package in place and confirm it landed:
 
 ```bash
-groundkit add react
-groundkit catalog react
+ck add react             # build from the curated catalog
+# or
+ck install npm/react     # pull the prebuilt package from the registry
+
+ck list
+ck query react "useEffect cleanup"
 ```
 
-**From a git repository:**
+`ck list` reads only the local store, so it works with no network. The
+same is true of `query` once a package is installed, unless you leave
+auto-install enabled and the package is missing. A question can also name the
+package instead of you naming it:
 
 ```bash
-# HTTPS URLs from GitHub, GitLab, Bitbucket, Codeberg, or another git host
-groundkit add https://github.com/mattpocock/skills
-
-# Build from a specific tag or branch
-groundkit add https://github.com/mattpocock/skills/tree/v1.2.3
-groundkit add https://github.com/mattpocock/skills --tag v1.2.3
-
-# Select documentation stored below a repository root
-groundkit add https://github.com/mattpocock/skills  --docs-path src/content
+ck query "what are components in angular?"
 ```
 
-By default, `add` discovers tags and uses the latest stable SemVer tag. Use
-`--tag <tag>` to pin an exact tag for automation. Use `--choose-tag` to select
-from available stable tags interactively; the default picker choice is latest
-stable tag. If no stable tags are available, GroundKit uses the default branch.
-GitHub-style `/tree/<branch-or-tag>` URLs are also supported and select that ref
-directly.
-
-GroundKit clones git sources into a temporary directory, reads and indexes the
-documentation, stores the resulting SQLite package locally, and removes the
-temporary clone after the build succeeds or fails.
-
-**From a local directory:**
-
-Clone the sample repository, then let GroundKit discover its top-level `docs/`
-folder automatically:
-
-```bash
-git clone --depth 1 https://github.com/mattpocock/skills ./skills
-groundkit add ./skills
-```
-
-Use `--path` when the folder to index is not the first detected docs folder.
-For example, load the repository's `skills/` folder explicitly:
-
-```bash
-groundkit add ./skills --path skills
-```
-
-`--path` is also useful when documentation lives in a custom directory. The
-older `--docs-path` spelling remains supported:
-
-```bash
-groundkit add /path/to/repo --path docs
-groundkit add /path/to/repo --docs-path documentation
-```
-
-Set a stable package identity and version while loading the cloned repository:
-
-```bash
-groundkit add ./skills --path docs --name mattpocock-skills --pkg-version 1.0.0
-```
-
-Save an additional copy for sharing while still installing the package locally:
-
-```bash
-groundkit add ./skills --path docs --name mattpocock-skills --pkg-version 1.0.0 \
-  --save ./artifacts/mattpocock-skills@1.0.0.db
-```
-
-`--save` accepts a `.db` file path or a directory. When given a directory,
-GroundKit uses the installed package filename inside that directory.
-
-GroundKit checks `docs/`, `documentation/`, `doc/`, `website/docs/`, `guides/`,
-`guide/`, `manual/`, `reference/`, `content/`, and `wiki/`, selecting the one
-with the most supported documentation files. If none contains supported files,
-it indexes the source root. Relative paths passed to `--path` resolve from the
-local source directory.
-
-If the source contains no supported documentation files, `add` still creates a
-package but prints a warning saying that no documentation content was found.
-The warning includes a Perplexity search link for finding the appropriate
-documentation repository. A small package also receives a warning with the
-same search suggestion because many projects keep docs in a separate repository.
-
-**From a website, URL, or package file:**
-
-Many documentation websites publish an [`llms.txt`](https://llmstxt.org/) file
-with AI-ready documentation. GroundKit first checks a website root for
-`/llms-full.txt`, then `/llms.txt`. When `llms.txt` is an index, GroundKit
-follows its Markdown links and fetches the linked documents into the local
-package.
-
-Use a website root for automatic discovery, a direct `llms.txt` URL, or
-`--name` to override the generated package name:
-
-```bash
-# Auto-fetch llms-full.txt or llms.txt from the website
-groundkit add https://agentgateway.dev
-
-# Add a direct llms.txt URL and follow its linked documents
-groundkit add https://agentgateway.dev/llms.txt
-
-# Use a custom package name and finding llms.txt
-groundkit add https://agentgateway.dev --name agent-gateway
-```
-
-**From any URL (blog posts, articles, raw Markdown):**
-
-```bash
-# Add an article; falls back to direct HTML extraction when no llms.txt exists
-groundkit add https://agentgateway.dev/blog/2026-08-20-benchmarking-agentgateway-epp-proxy-overhead/
-
-# Add raw Markdown from a GitHub blob URL
-groundkit add https://github.com/agentgateway/agentgateway/blob/main/README.md --name agentgateway-readme
-```
-
-**From a package file:**
-
-```bash
-groundkit add ./my-project --docs-path docs
-groundkit add https://cdn.example.com/react@18.db
-groundkit add ./react@19.1.0.db
-```
-
-**From a local saved database:**
-
-After saving a package database, add it from the local filesystem:
-
-```bash
-groundkit add https://github.com/mattpocock/skills \
-  --path docs \
-  --name mattpocock-skills \
-  --pkg-version 1.2.3 \
-  --save ./mattpocock-skills@1.2.3.db
-
-groundkit add ./mattpocock-skills@1.2.3.db
-```
-
-Build a package once, save the portable database, and host it from any HTTP
-server. `add` downloads and installs remote `.db` URLs, including hosted
-`name@version` paths:
-
-```bash
-groundkit add https://github.com/mattpocock/skills \
-  --path docs \
-  --name mattpocock-skills \
-  --pkg-version 1.2.3 \
-  --save ./artifacts/mattpocock-skills@1.2.3.db
-
-groundkit add https://packages.example.com/mattpocock-skills@1.2.3
-```
-
-`add` supports `--path <path>` and its `--docs-path <path>` alias for repository
-or directory sources. It builds locally and stores the resulting SQLite
-package; it does not query or download from the registry. `--name <name>`
-overrides the package ID and display name, while `--pkg-version <version>`
-stores an explicit package and source version.
-
-To import an existing local or remote `.db` package, use `install`:
-
-```bash
-groundkit install ./react@19.1.0.db
-groundkit install https://example.com/react@19.1.0.db
-```
-
-For a website root, `add` first probes `/llms-full.txt` and `/llms.txt`. If
-neither endpoint exists, GroundKit fetches the requested page directly. HTML
-pages are reduced to readable article content before indexing; raw Markdown and
-other text responses are indexed as-is. Direct article and raw Markdown URLs
-also work:
-
-```bash
-groundkit add https://overreacted.io/things-i-dont-know-as-of-2018/
-groundkit add https://raw.githubusercontent.com/neuledge/context/main/README.md
-```
-
-If a source produces fewer than three indexed sections, GroundKit prints a
-low-section warning suggesting that documentation may be in another repository
-or subfolder. It does not currently generate a Google search link.
-
-### `groundkit install <registry/name|name|source> [version]`
-
-Install with local-first resolution. This is the fallback-capable workflow:
-
-```bash
-# Search registry only when no matching local package exists
-groundkit install npm/react
-
-# Request exact version
-groundkit install npm/react 19.1.0
-
-# Bare names default to npm
-groundkit install react
-
-# Missing registry package falls back to local catalog/source build
-groundkit install react 19.1.0
-```
-
-Resolution order:
-
-1. Reuse matching package already in local store. No network request.
-2. Search configured registry and import matching `.db` artifact.
-3. If registry has no match or is unavailable, build from the catalog or source locally.
-
-### `groundkit search-packages <registry> <name> [version]`
-
-Search registry metadata and versions. Search is read-only: it never downloads
-or installs a package.
-
-```bash
-groundkit search-packages npm react
-groundkit search-packages npm react 19.1.0
-groundkit search-packages pip django
-```
-
-### `groundkit download-package <registry> <name> <version>`
-
-Download one exact pre-built registry package. This is strict and does not
-fallback to another version or local build when the artifact is unavailable.
-
-```bash
-groundkit download-package npm react 19.1.0
-```
-
-Use `install` instead when registry failure should trigger local fallback.
-
-### `groundkit import <package-file>` and `groundkit export <package-id> <destination>`
-
-Import or share portable SQLite package artifacts without rebuilding:
-
-```bash
-groundkit import ./artifacts/react@19.1.0.db
-groundkit export react ./artifacts
-```
-
-### `groundkit list`, `inspect`, `query`, `refresh`, and `remove`
-
-- `groundkit list` displays installed package ids, versions, document counts, section counts, and totals.
-- `groundkit inspect <package-id>` displays package metadata, source information, and local database path.
-- `groundkit query <library> <topic>` searches one installed package locally and returns the same JSON shape as MCP `get_docs`.
-- Use `library@version` for an exact installed version; a bare library name selects the newest installed version.
-- `groundkit refresh <package-id>` rebuilds a package from its recorded source.
-- `groundkit remove <name[@version]>` removes one installed package version. A
-  bare name is accepted when only one version is installed. If multiple
-  versions exist, GroundKit lists them and asks you to choose one interactively;
-  non-interactive runs fail without deleting anything.
-
-Examples:
-
-```bash
-groundkit list
-groundkit inspect react
-groundkit query react "useEffect cleanup"
-groundkit query 'nextjs@16.0' 'middleware authentication'
-groundkit remove mattpocock-skills
-groundkit remove mattpocock-skills@1.2.3
-groundkit remove agentgateway
-groundkit export react ./artifacts
-```
-
-### Start MCP servers
-
-- `groundkit mcp` starts the MCP server over stdio. It reads only packages already in the local store.
-- `groundkit mcp --libs package-a,package-b` or `groundkit mcp -l package-a,package-b` restricts the session to selected installed package names.
-- `groundkit mcp --http [port] --host <host>` starts the Streamable HTTP MCP host and exposes MCP at `/mcp`.
-- `groundkit mcp http --urls http://localhost:4000` or `groundkit mcp h -u http://localhost:4000` provides the explicit URL form.
-- `docker compose up --build mcp` starts the HTTP server at `http://localhost:8081/mcp`.
-- `docker compose run --rm -i mcp-stdio` runs the Docker MCP server over stdio for clients that launch containers as subprocesses.
-
-During development, run the native `groundkit mcp` subcommand; no separate
-script `PATH` entry is required.
-
-Short aliases for the MCP executable:
-
-| Command  | Short alias |
-| -------- | ----------- |
-| `http`   | `h`         |
-| `--libs` | `-l`        |
-| `--urls` | `-u`        |
-
-Examples:
-
-```bash
-groundkit mcp
-groundkit mcp -l react,vite
-groundkit mcp --http 4000 --host 0.0.0.0
-```
-
-### `groundkit catalog [query]`
-
-List the initial curated sources:
-
-```bash
-groundkit catalog
-groundkit catalog react
-```
-
-Catalog names can be passed directly to `add`. GroundKit expands them to their
-known repository and documentation path before building a local package:
-
-```bash
-groundkit add react
-```
-
-The MCP server exposes `library_catalog` for discovery and `get_docs` as the
-Context7-compatible name for the existing local retrieval tool. `resolve-source`
-and `query-docs` remain available for existing clients.
-
-## Registry packages, bundles, and OCI distribution
-
-GroundKit can use any compatible GroundKit registry. Consumer commands default to
-the public catalog at
-`https://mehdihadeli.github.io/groundkit/registry/index.json`. Set
-`RegistryUrl` or `GROUNDKIT_REGISTRY_URL` for a different catalog or API.
-Registry access is explicit and user-controlled:
-GroundKit never downloads packages in the background, during `serve`, or merely
-because a package name appears in configuration. A package is downloaded only
-after the user runs `download-package` or `install`.
-
-There are three end-user registry workflows:
-
-1. **Search, then choose.** Run `search-packages` to inspect available versions.
-   This is discovery only and never changes the local store. Then run
-   `download-package` for the exact version you approve.
-2. **Explicit registry download.** Run `download-package <registry> <name> <version>`
-   when you already know the exact artifact to install. This is the
-   strict path for reproducible installs.
-3. **Local-first install.** Run `install <registry/name> [version]` or
-   `install <name> [version]`. GroundKit first checks the local store, then
-   searches the registry and installs a matching artifact, then builds from the
-   catalog or supplied source locally if registry lookup has no match or the
-   registry cannot be reached.
-
-Examples for each workflow:
-
-```bash
-# 1. Search, review versions, then choose one
-groundkit search-packages npm next
-groundkit download-package npm next 15.5.0
-
-# 2. Install one exact artifact without discovery
-groundkit download-package npm react 19.1.0
-
-# 3. Let local-first install resolve registry or local fallback
-groundkit install npm/vite
-groundkit install react 19.1.0
-```
-
-For `install`, resolution order is:
-
-1. Matching package already exists in the local store. No network request is made.
-2. Registry search finds a matching package. GroundKit downloads the `.db` artifact and imports it locally.
-3. Registry has no match or cannot be reached. GroundKit builds from the built-in catalog or the supplied local/source input and saves that package locally.
-
-`download-package` is intentionally strict: it installs the requested registry
-artifact and reports an error if that exact registry download fails. Use
-`install` when local fallback is required. After any successful registry import,
-MCP queries use the local SQLite package and do not contact the registry.
-
-### Configure registry address
-
-Set registry address per project in `.groundkit/config.json`:
+## Connecting an MCP client
+
+Point the client at `ck mcp` over stdio. Most clients take the same
+server block; only the file location differs.
+
+| Client | Config file |
+| --- | --- |
+| VS Code (GitHub Copilot) | `.vscode/mcp.json` in the workspace |
+| GitHub Copilot CLI | `~/.copilot/mcp-config.json` |
+| Claude Code | `claude mcp add ck -- ck mcp` |
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` (Windows), `~/Library/Application Support/Claude/` (macOS), `~/.config/claude/` (Linux) |
+| Cursor | `~/.cursor/mcp.json` or `.cursor/mcp.json` |
+| Windsurf | `%USERPROFILE%\.codeium\windsurf\mcp_config.json` |
+| Zed | `settings.json`, under `context_servers` |
 
 ```json
 {
-  "RegistryUrl": "http://localhost:8080"
+  "mcpServers": {
+    "groundkit": {
+      "command": "ck",
+      "args": ["mcp"]
+    }
+  }
 }
 ```
 
-Or override it for one shell/session with `GROUNDKIT_REGISTRY_URL`:
+The MCP server also ships as its own tool shim, `groundkit-mcp`, if you prefer a
+single-purpose executable in client config.
 
-```powershell
-$env:GROUNDKIT_REGISTRY_URL = "https://registry.example.com"
-groundkit search-packages npm react
+For HTTP transport — several clients, one server, or a container:
+
+```bash
+ck mcp --http 4000 --host 0.0.0.0
 ```
 
-Environment variables take precedence over `.groundkit/config.json`. Copy
-`.groundkit/config.example.json` to `.groundkit/config.json` for a complete
-example. `HttpHeaders` can provide registry authentication or other request
-headers; do not commit credentials to project configuration.
+The endpoint is `http://<host>:<port>/mcp`. Clients that speak streamable HTTP
+can point straight at the URL instead of spawning a process.
 
-### Registry distribution flow
+To pin a session to specific packages, pass `--libs`:
 
-`GroundKit.Registry` builds packages through the `groundkit registry` branch.
-The [Registry Update workflow](.github/workflows/registry-update.yml) builds
-package files, pushes them to the GitHub Container Registry as content-addressed
-OCI artifacts, and uploads the generated catalog artifact that the docs workflow
-serves from Pages.
-
-```mermaid
-flowchart TD
-  definitions["registry/&lt;manager&gt;/*.yaml"] --> workflow["Registry Update workflow"]
-  workflow --> tooling["groundkit registry<br/>GroundKit.Registry library"]
-  tooling -->|validate and build-all| packages["dist-packages/*.db"]
-  packages -->|push-oci| ghcr["GitHub Container Registry<br/>content-addressed OCI artifacts"]
-  packages -->|catalog-index --oci-references| catalog["index.json"]
-  catalog --> pages["Docs workflow deploys catalog<br/>to Pages"]
-  pages -->|Catalog discovery| cli["GroundKit.Cli<br/>groundkit"]
-  ghcr -->|Digest-pinned manifest and blob pull| cli
-  cli -->|Install or import| local[("Local SQLite packages")]
-  local --> queries["CLI queries and MCP<br/>No registry connection needed"]
+```bash
+ck mcp -l react,vite
+ck mcp -l 'nextjs@16.0'
 ```
 
-The `push-oci` step stores each SQLite package as a single-layer OCI manifest
-addressed by digest, and the catalog records those digests. Consumers resolve a
-manifest, download one blob, verify size and SHA-256, and import. Consumers
-install packages explicitly and then query them locally.
+A bare name exposes every installed version; `name@version` exposes exactly one.
 
-| Distribution target | Commands used by maintainers or CI | Availability |
+## Command reference
+
+| Command | Aliases | Purpose |
 | --- | --- | --- |
-| OCI registry (GHCR) | `registry validate`, `registry build-all`, `registry push-oci` | Current workflow; digest-addressed packages pulled by the CLI. |
-| Offline bundles | `registry build-all`, `registry bundle`, `registry import-bundle` | Available locally; not included in the current workflow. |
-| Static catalog on Pages | `registry validate`, `registry build-all`, `registry push-oci`, `registry catalog-index`, then the docs deployment | Current workflow; requires successful CI and Pages configuration. |
+| `add <source>` | `a` | Build and install a package from a source |
+| `install <name\|source> [version]` | `i` | Install prebuilt if possible, otherwise build |
+| `search-packages <registry> <name> [version]` | `sp`, `search` | Read registry metadata |
+| `download-package <registry> <name> <version>` | `dp`, `dl` | Download one exact artifact, no fallback |
+| `list` | `l`, `ls` | Show installed packages and totals |
+| `inspect <id>` | `ins`, `info` | Show metadata, source, and `.db` path |
+| `query <library> <topic>` | `q` | Search one package from the terminal |
+| `query "<question>"` | `q` | Detect the package from the question, then search |
+| `refresh <id>` | `rf`, `ref` | Rebuild from the recorded source |
+| `remove <name[@version]>` | `rm`, `del` | Delete one installed version |
+| `import <file>` | `im` | Load a portable `.db` |
+| `export <id> <destination>` | `ex`, `exp` | Write a portable `.db` |
+| `catalog [query]` | `c`, `cat` | List curated sources |
+| `mcp` | — | Start the MCP server |
+| `registry <subcommand>` | — | Maintainer tooling for package definitions |
 
-Publishing runs only from trusted, merged definitions on the default branch, never
-from contributor PR jobs. See the [maintainer flow guide](src/GroundKit.Registry/README.md#distribution-flow)
-for the complete command sequence.
+Shared options: `--path`/`-p`, `--name`/`-n`, `--pkg-version`/`-v`,
+`--save`/`-s`, `--tag`/`-t`, `--choose-tag`/`-c`.
 
-### Catalog endpoint
+### Building a package
 
-Consumers need only the catalog URL. The default is the public Pages catalog at
-`https://mehdihadeli.github.io/groundkit/registry/index.json`. The catalog maps
-each package to an OCI manifest digest, byte size, and SHA-256; there is no
-server to run and no credential needed to read.
+Not everything belongs in a public registry. Use `add` for private
+repositories, internal runbooks and design systems, or a library the catalog
+carries in an older version than you depend on. `add` always builds from source
+and never queries the catalog, so the package is produced and stored locally and
+your source never has to be published.
 
-Point GroundKit at another catalog with `.groundkit/config.json`:
+```bash
+ck add react
+ck add https://github.com/mattpocock/skills
+ck add ./skills
+ck add https://agentgateway.dev
+ck add ./packages/react@19.1.0.db
+```
+
+For a directory or repository, ContextKit picks the docs folder automatically. It
+looks at `docs/`, `documentation/`, `doc/`, `website/docs/`, `guides/`,
+`guide/`, `manual/`, `reference/`, `content/`, and `wiki/`, and chooses whichever
+holds the most supported files. Override it when the guess is wrong:
+
+```bash
+ck add ./skills --path skills
+ck add https://github.com/vuejs/docs --docs-path src
+```
+
+For git sources, ContextKit uses the latest stable SemVer tag. Pin or pick
+explicitly when you need reproducible packages:
+
+```bash
+ck add https://github.com/mattpocock/skills --tag v1.2.3
+ck add https://github.com/mattpocock/skills --choose-tag
+ck add https://github.com/mattpocock/skills/tree/v1.2.3
+```
+
+Clones go to a temporary directory and are cleaned up whether the build succeeds
+or fails. Set identity explicitly when you want the package id to differ from the
+source name:
+
+```bash
+ck add ./skills --path docs --name mattpocock-skills --pkg-version 1.0.0
+```
+
+### Querying
+
+```bash
+ck query react "useEffect cleanup"
+ck query 'nextjs@16.0' 'middleware authentication'
+ck query vue "composition api" --pretty
+ck query vue "composition api" --no-install
+```
+
+Skip the package name entirely and ask a question, and `query` works out which
+package you mean:
+
+```bash
+ck query "how do i add request interceptors in axios?"
+```
+
+Detection runs against what is installed first and the curated catalog second,
+so a local copy always wins over a download. It matches the words of the
+question rather than demanding an exact id: `next.js` and `Next JS` are the same
+name, common aliases such as `angularjs` and `nest` are recognised, and a small
+typo like `angualr` is forgiven. An explicitly named package beats a near miss,
+so `next steps in angualr` is read as `next`. When the question names nothing
+known, the command exits with `1` and lists the installed packages and the
+`ck add` commands that would make one queryable.
+
+`query` prints the same JSON shape as the MCP `get_docs` tool, or rendered panels
+with `--pretty`. If the package is installed it stays local. If it is published
+but not installed, `query` downloads it first; `--no-install` disables that and
+reports how to add the package instead.
+
+`library@version` selects an exact installed version. A bare name takes the
+newest one. `remove` behaves the same way: with several versions installed, a
+bare name lists them and asks which to delete, so nothing disappears by
+accident.
+
+### Search modes
+
+Choose how ContextKit ranks sections independently of how it finds the library:
+
+| Mode | Retrieval | When to use it | Setup |
+| --- | --- | --- | --- |
+| `lexical` | SQLite FTS5/BM25 | API names, flags, error codes, quoted phrases | None; default |
+| `semantic` | Local embedding similarity | Paraphrases that use different words from the docs | Optional provider and model |
+| `hybrid` | BM25 and embeddings combined by reciprocal-rank fusion | Questions that mix identifiers and descriptions | Optional provider and model |
+
+The standard install stays independent of ONNX Runtime, Semantic Kernel, and model
+weights. Lexical search works immediately after adding a documentation package:
+
+```bash
+dotnet tool install --global ContextKit
+ck add react
+ck query react "useEffect cleanup" --search-mode lexical
+```
+
+To try semantic or hybrid search, install the optional assets once:
+
+```bash
+ck semantic provider install onnx
+ck semantic model install bge-micro-v2
+
+ck query react "stop background work after component removal" --search-mode semantic
+ck query react "stop background work after component removal" --search-mode hybrid
+```
+
+Installing assets does not change the default. `--search-mode` selects one query;
+omit it to use the configured default. To make hybrid search the default:
+
+```bash
+ck semantic enable --model bge-micro-v2 --mode hybrid
+ck semantic status
+ck query react "stop background work after component removal"
+ck query react "useEffect" --search-mode lexical
+ck semantic disable
+```
+
+`enable` verifies the worker/model and indexes installed packages before changing
+the default for CLI and MCP. Newly added or changed packages are indexed on their
+first semantic query; `ck semantic index react` prepares one explicitly. That first
+index can take longer than subsequent queries. An explicit mode overrides the
+configured default; missing setup is an error, not a silent fallback. MCP query
+tools accept the same override as `searchMode`. Use `--mode semantic` instead to
+make embedding-only search the default. `disable` restores lexical search without
+removing installed assets.
+
+The initial supported model is pinned, quantized BGE Micro V2: English, 384
+dimensions, MIT, approximately 17.6 MB including vocabulary and license. Models
+must match a tested tokenizer and pooling profile; arbitrary ONNX files are not
+supported. Portable documentation databases remain unchanged; vectors live in
+separate caches keyed by package contents and model profile.
+
+Setup is stored under `GROUNDKIT_HOME/semantic`, or `~/.groundkit/semantic` when
+unset. Provider downloads use matching ContextKit release assets for Windows x64,
+Linux x64, macOS x64, and macOS arm64. Source builds can import a trusted local
+bundle with `--bundle`; see [CLI reference](docs/reference/cli.md). Queries do not
+download the provider or model, and local inference needs no API key, Docker, or
+Ollama. Neither optional mode has been shown to outperform BM25 on a shared
+documentation benchmark.
+
+See [Search mode guide](docs/guide/grounding.md#choosing-a-search-mode) for setup,
+indexing, mode overrides, and troubleshooting, and
+[MCP search modes](docs/reference/mcp-tools.md#search-modes) for tool arguments.
+
+### The MCP tool surface
+
+| Tool | Purpose |
+| --- | --- |
+| `query-docs` | Search an installed package under a token budget |
+| `ask-docs` | Ask a question without naming a package; detects it, downloads it if published, then searches |
+| `get_docs` | Context7-compatible alias for `query-docs` |
+| `resolve-source` | Match installed packages by id or display name |
+| `library_catalog` | List curated sources |
+| `search_packages` | Search a compatible registry |
+| `download_package` | Download a registry package and import it |
+
+Documentation results come back twice: structured content for MCP-aware clients,
+and a compact plain-text rendering for agents that read tool output as prose.
+When a package is not installed, `query-docs` and `get_docs` answer with what
+they can see locally, what the registry offers, and the exact `ck install`
+command; they do not download anything themselves. `ask-docs` is the one tool
+that installs, and only the package it detected from the question.
+See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
+
+## Documentation sources
+
+The catalog is a starting point, not a boundary. Anything you can point at — a
+private repository, an internal runbook, an unpublished design system, a site
+that publishes `llms.txt`, or a single blog post — can become a local package.
+
+| Source | What ContextKit does |
+| --- | --- |
+| Git repository | Clones the repo at a tag or branch, finds the docs folder, indexes it |
+| Local directory | Reads the folder in place; no clone, no cleanup |
+| `llms.txt` site | Probes `/llms-full.txt`, then `/llms.txt`; follows index links when needed |
+| Any URL | Falls back to fetching the page and reducing HTML to article content |
+| Package file | Imports an existing `.db` instead of building |
+
+Markdown, MDX, HTML, and other text formats are indexed as-is; HTML pages lose
+navigation, CTAs, and comment widgets before indexing.
+
+Two warnings are worth knowing about. If a source yields no supported files, the
+build still produces a package but warns and includes a search link for locating
+the right documentation repository. A package with very few sections gets a
+similar warning, because that usually means the docs live somewhere else — many
+projects keep them in a separate repo.
+
+## Package files and the local store
+
+A package is a single SQLite database. That makes it easy to move, inspect, and
+back up.
+
+- Default store: `.groundkit/packages` in the working tree, or
+  `GROUNDKIT_HOME/packages` when that variable is set.
+- `ck list` shows ids, versions, sizes, document counts, and section
+  counts.
+- `ck inspect <id>` shows metadata, the recorded source, and the path to
+  the database file.
+- `ck refresh <id>` rebuilds from the recorded source.
+- `ck export <id> <dir>` and `ck import <file>` move packages
+  between machines without a rebuild.
+
+### Replacing an installed package
+
+Builds and downloads are verified before they reach the store. A registry
+download is written to a temporary file, checked against the catalog's size and
+SHA-256, and only then moved into place. A failed build or failed check leaves
+the previously installed package intact, and temporary files are excluded from
+package discovery.
+
+Store names come from the package's own identity rather than the incoming file
+name, so re-installing the same id and version replaces that single entry
+instead of storing a duplicate. If the operating system refuses to replace a
+file that is still open — on Windows, usually a reader holding the SQLite file —
+close the reader and rerun the command.
+
+## Installing from the registry
+
+Prebuilt packages save you a clone and a build. The catalog is a static
+`index.json` on GitHub Pages that maps each package to a GHCR OCI manifest
+digest, its byte size, and its SHA-256. A consumer resolves the digest, downloads
+one layer, verifies it, and imports it. Reads are anonymous and there is no
+server to run.
+
+The catalog is built from declarative YAML definitions contributed to this
+repository, one file per library. CI turns each definition into a package and
+publishes it, so no one has to trust a hand-uploaded file.
+
+```bash
+ck search-packages npm axios
+ck install npm/axios
+ck download-package npm/react 19.1.0
+```
+
+`install` resolves in this order:
+
+1. A matching package in the local store — no network request at all.
+2. A registry match — download the artifact, verify size and SHA-256, import it.
+3. No registry match, or the registry is unreachable — build from the catalog
+   entry or the source you supplied.
+
+A registry that responds but serves a broken artifact (missing manifest, size or
+checksum mismatch) is treated as an error. That is a broken catalog entry, not a
+missing package, so `install` does not quietly fall back to a build.
+`download-package` is the strict path when only a registry artifact will do.
+
+Bare names default to `npm`, and a name with a version pins the exact artifact:
+
+```bash
+ck install react                 # npm/react
+ck install npm/angular 20.3.15
+ck query 'angular@20.3.15' 'component lifecycle'
+```
+
+The starter catalog covers 19 JavaScript and web libraries. Definitions live in
+`registry/npm/`:
+
+| Category | Libraries |
+| --- | --- |
+| Frameworks | Next.js, NestJS, Vue, Angular |
+| React ecosystem | React, Vite, Vitest |
+| Backend and APIs | Express, Fastify, GraphQL, Zod |
+| Styling | Tailwind CSS |
+| Tooling | TypeScript, ESLint, Prettier |
+| Data and testing | Axios, Jest, Playwright, VitePress |
+
+A library that is missing is a YAML file away — see
+[Contributing a definition](#contributing-a-definition).
+
+### Contributing a definition
+
+Definitions are declarative, so adding a library does not mean patching the
+builder. One file describes where the docs live and which ref to build:
+
+```yaml
+# registry/npm/react.yaml
+name: react
+description: "User interface library"
+repository: https://github.com/reactjs/react.dev
+source:
+  type: git
+  url: https://github.com/reactjs/react.dev
+  docs_path: src/content
+```
+
+Validate and build it locally before opening a pull request:
+
+```bash
+ck registry validate --dir registry
+ck registry build react --dir registry --output ./dist-packages
+```
+
+Once merged, the Registry Update workflow builds the definition, pushes the
+result to GHCR as a content-addressed OCI artifact, and records the manifest
+digest in the catalog. From then on `ck install npm/react` serves it, and every
+consumer verifies the same bytes. Publishing runs only from merged definitions
+on the default branch, never from contributor pull requests.
+
+### Pointing at another catalog
+
+Set the address per project in `.groundkit/config.json`:
 
 ```json
 {
@@ -697,171 +500,126 @@ Point GroundKit at another catalog with `.groundkit/config.json`:
 }
 ```
 
-Without configuration, consumer commands use the public Pages catalog at
-`https://mehdihadeli.github.io/groundkit/registry/index.json`. Set
-`GROUNDKIT_REGISTRY_URL` or `RegistryUrl` to use another catalog. Use
-`HttpHeaders` for private registry request headers, but keep secrets out of
-committed files.
+`GROUNDKIT_REGISTRY_URL` overrides the file, and `--registry-url <url>` overrides
+both for a single invocation. `HttpHeaders` is for private registries; keep
+credentials out of committed files.
 
-### Bundle option for offline or bulk transfer
+## Sharing packages
 
-The registry maintainer CLI builds packages and creates a bundle containing all
-`.db` files, `index.json`, and `SHA256SUMS`:
+Packages are just files, so a team can pass them around directly:
 
 ```bash
-groundkit registry validate --dir registry
-groundkit registry build-all --dir registry --output ./dist-packages
-groundkit registry bundle --output ./dist-packages --format zip
-groundkit registry bundle --output ./dist-packages --format tar.gz
+# Build once, keep a copy
+ck add ./skills --name mattpocock-skills --pkg-version 1.2.3 \
+  --save ./artifacts/mattpocock-skills@1.2.3.db
+
+# A teammate imports it — no clone, no build
+ck install ./mattpocock-skills@1.2.3.db
+ck install https://packages.example.com/mattpocock-skills@1.2.3
 ```
 
-Import a bundle on an offline machine, then query or serve the imported packages:
+`--save` accepts a file or a directory; for a directory, the installed package
+filename is used. Hosting the `.db` behind any HTTP server is enough — no
+ContextKit-specific server is required. Note that a direct `.db` URL skips the
+catalog's checksum verification.
+
+## Running in Docker
 
 ```bash
-groundkit registry import-bundle \
-   ./dist-packages/groundkit-registry.zip --output ./imported-packages
-groundkit import ./imported-packages/react@latest.db
-groundkit list
+docker compose up --build mcp         # http://localhost:8081/mcp
+docker compose run --rm -i mcp-stdio  # stdio, no published port
 ```
 
-The bundle is a distribution artifact, not a live registry. Importing its `.db`
-files enables local queries, not `search-packages`. Registry search requires a
-configured catalog.
+Both services set `GROUNDKIT_HOME=/data` and share the `mcp-data` volume. The
+image runs the HTTP transport by default; `mcp-stdio` exists for clients that
+launch containers as subprocesses. Either way, packages must already be in the
+mounted store — the server does not download during queries.
 
-### GitHub Actions artifact option
+## Registry maintainer commands
 
-The included `Registry Update` workflow runs on schedule and manual dispatch.
-It validates definitions, builds individual `.db` files, and uploads them as a
-GitHub Actions artifact named `groundkit-registry-<run-id>`. Bundles can be built
-locally with the commands above; the workflow does not create them yet.
-
-Download that artifact from GitHub Actions or with GitHub CLI:
+`ContextKit.Registry` is a command library hosted inside the same CLI, not a
+separate executable.
 
 ```bash
-gh run list --workflow registry-update.yml
-gh run download <run-id> --name groundkit-registry-<run-id> --dir ./registry-download
-groundkit import ./registry-download/react@latest.db
-```
-
-GitHub Actions artifacts are suitable for CI handoff and short-lived builds.
-The workflow currently retains them for 14 days, so use a release asset, bundle
-archive, or HTTP registry for durable distribution.
-
-### GitHub Container Registry + Pages
-
-The [Registry Update workflow](.github/workflows/registry-update.yml) builds
-packages, pushes them to GHCR, and generates a catalog. The
-[docs workflow](.github/workflows/deploy-docs.yml) deploys that catalog alongside
-the existing Pages site after a successful registry run. A public endpoint exists
-only after both workflows succeed.
-
-```mermaid
-flowchart LR
-  build["CI builds .db packages"] --> push["push-oci publishes single-layer OCI manifests"]
-  build --> catalog["catalog-index generates digest-pinned index.json"]
-  push --> pages["Docs workflow deploys registry/index.json"]
-  catalog --> pages
-  pages --> client["CLI resolves manifest digest and verifies SHA-256"]
-```
-
-| Component | Implementation |
-| --- | --- |
-| Catalog generation | `groundkit registry catalog-index --oci-references` reads SQLite identity/version, matches definitions, and records each OCI manifest URL, size, and SHA-256. |
-| Package storage | Each package is one OCI manifest whose single layer is the SQLite file, addressed by digest in GHCR. No GitHub Release is created. |
-| Pages catalog | Docs deployment preserves the newest published catalog at `registry/index.json`. |
-| Consumer verification | Existing `search-packages`, `download-package`, and `install` commands resolve the digest, download the blob, and verify size and SHA-256 before import. |
-
-Enable Pages with the GitHub Actions source and allow workflow Release writes.
-Enable release immutability for platform-enforced protection. Workflows must be
-on the default branch and all build/test gates must pass. The Pages deployment
-summary reports the actual catalog URL. Configure it explicitly:
-
-```powershell
-$env:GROUNDKIT_REGISTRY_URL = "https://OWNER.github.io/REPOSITORY/registry/index.json"
-groundkit search-packages npm react
-groundkit install npm/react
-```
-
-Replace the example URL with your deployment. No new consumer commands are
-needed. A site root is not a catalog URL: include the full `registry/index.json`
-path. Direct `.db` URLs also work, but bypass catalog checksum verification. See
-the [registry tooling README](src/GroundKit.Registry/README.md#public-distribution-status)
-for catalog generation and publication details.
-
-### Registry maintainer commands
-
-`GroundKit.Registry` is a command library used by `GroundKit.Cli`, not a separate
-executable or tool installation. Maintainer commands live under `groundkit registry`:
-
-Short aliases for the maintainer CLI:
-
-| Command | Short alias(es) | Used for |
-| --- | --- | --- |
-| `list` | `l`, `ls` | Contributor and maintainer definition discovery. |
-| `validate` | `v`, `val` | Local checks and the current CI workflow. |
-| `build` | `b` | Building one definition locally. |
-| `build-all` | `ba` | Bulk builds and the current CI workflow. |
-| `push-oci` | `po` | Publishing packages to an OCI registry such as GHCR. |
-| `bundle` | `bd`, `bun` | Offline or bulk artifact distribution. |
-| `import-bundle` | `ib` | Extracting bundles before importing individual packages. |
-| `catalog-index` | None | Generating catalog metadata and content-addressed Release asset copies. |
-
-| Option                      | Short alias |
-| --------------------------- | ----------- |
-| `--dir`                     | `-d`        |
-| `--output`                  | `-o`        |
-| `--format`                  | `-f`        |
-| `--destination`             | `-t`        |
-| `--oci-repository`          | None        |
-| `--oci-references`          | None        |
-| `--base-url`                | None        |
-
-```bash
-groundkit registry list --dir registry
-groundkit registry validate --dir registry
-groundkit registry build react --dir registry --output ./dist-packages
-groundkit registry push-oci --dir registry --output ./dist-packages \
+ck registry list --dir registry
+ck registry validate --dir registry
+ck registry build react --dir registry --output ./dist-packages
+ck registry build-all --dir registry --output ./dist-packages
+ck registry push-oci --dir registry --output ./dist-packages \
   --oci-repository ghcr.io/OWNER/REPOSITORY --oci-references ./oci-references.json
+ck registry catalog-index --dir registry --output ./dist-packages --oci-references
+ck registry bundle --output ./dist-packages --format zip
+ck registry import-bundle ./dist-packages/groundkit-registry.zip --output ./imported
 ```
 
-Short-form example:
+| Subcommand | Aliases | Purpose |
+| --- | --- | --- |
+| `list` | `l`, `ls` | Discover definitions |
+| `validate` | `v`, `val` | Check definitions locally and in CI |
+| `build` | `b` | Build one definition |
+| `build-all` | `ba` | Build every definition |
+| `push-oci` | `po` | Publish packages to an OCI registry |
+| `bundle` | `bd`, `bun` | Produce an offline archive |
+| `import-bundle` | `ib` | Extract an archive |
+| `catalog-index` | — | Generate the catalog the CLI consumes |
+
+Publishing authenticates with `GROUNDKIT_OCI_USERNAME` and
+`GROUNDKIT_OCI_TOKEN`, falling back to `GITHUB_TOKEN` and `GITHUB_ACTOR`. With
+neither set, the client reads the target host's Docker credential entry, so CI
+can log in with `docker/login-action` instead of exporting a token.
+
+The [Registry Update workflow](.github/workflows/registry-update.yml) runs
+validation and builds on the default branch, pushes content-addressed OCI
+artifacts to GHCR, and generates the catalog the docs workflow serves from
+Pages. Publishing only happens from merged definitions, never from contributor
+PRs. Full sequence: [src/ContextKit.Registry/README.md](src/ContextKit.Registry/README.md).
+
+## Working on ContextKit
 
 ```bash
-groundkit registry b react -d registry -o ./dist-packages
+dotnet build
+dotnet test
+dotnet tool restore
+dotnet run --project src/ContextKit.Cli -- list
 ```
 
-Set `GROUNDKIT_OCI_USERNAME` and `GROUNDKIT_OCI_TOKEN` when publishing to an OCI
-registry; the token falls back to `GITHUB_TOKEN` and the username to
-`GITHUB_ACTOR`. When neither is set the client reads the target host's entry in
-the Docker credential file, so CI logs in with `docker/login-action` rather than
-exporting a token. Publishing is for maintainers or CI; end users only need the
-catalog URL and read access.
+`ContextKit.slnx` gathers the projects: `ContextKit.Abstractions` (shared records
+and interfaces), `ContextKit.Core` (source detection, ingestion, package builds,
+observability, OCI), `ContextKit.Storage.Sqlite` (persistence, FTS5, BM25),
+`ContextKit.Hosting` (DI composition and shared MCP startup), `ContextKit.Mcp`
+(reusable tools, deterministic formatting, transports), `ContextKit.Mcp.Host`
+(the `groundkit-mcp` tool), `ContextKit.Registry` (maintainer commands),
+`ContextKit.ServiceDefaults`, `ContextKit.Semantic.Onnx` (optional worker), and
+`ContextKit.Cli` (the `ck` tool). Tests live under `tests/` and cover Core, SQLite,
+CLI, MCP, and Registry behavior.
 
-### Opt-in package policy
+The CLI and standalone MCP executable share Hosting services, not executable
+project references. SQLite depends on semantic interfaces; Hosting selects the
+provider. ONNX dependencies and model assets remain outside both tool packages.
+See [architecture](docs/guide/architecture.md) for the dependency graph.
 
-Default policy is manual approval. Keep `.groundkit/config.json` focused on
-connection and limits; it is not a package download list. Review packages with
-`search-packages`, then explicitly run `download-package` or `install`. Start
-the MCP server only after approved packages appear in `list`.
+Release versions come from NBGV commit-height previews, with RC and stable
+releases gated on tags. See [docs/guide/versioning.md](docs/guide/versioning.md).
 
-MCP agents can use `search_packages`, `download_package`, and `get_docs`, but
-tool availability does not trigger downloads automatically. Downloaded `.db`
-packages are imported into the local store and queried without a network call.
+## Where this is heading
 
-## Near-term roadmap
+1. Better docs-folder discovery and repository heuristics.
+2. Chunking that follows documentation structure rather than splitting on
+   sections alone.
+3. Adjacent-chunk merging so answers arrive as coherent passages instead of
+   fragments.
+4. Package inspection and health diagnostics.
+5. Retrieval tuning: title weighting and clearer agent-facing output.
 
-1. Tighten package lifecycle UX and semantics: naming, versioning, inspection, and refresh behavior.
-2. Tighten build fidelity: docs path discovery, source versioning, better chunking, dedupe, and warnings.
-3. Tighten retrieval quality: title weighting, adjacent merge, better formatting for agent consumption.
-4. Expand tests around end-to-end local package build, export/import, and query behavior.
-5. Consider optional later-phase features only after the local lexical path feels solid.
+Explicitly out of scope for now: a team sync service, graph retrieval, and
+multi-tenant deployment. Semantic search remains opt-in until retrieval quality
+is measured against labeled documentation queries.
 
-## Success criteria
+## Further reading
 
-GroundKit is successful when a developer can:
-
-1. Point the tool at a repo, local docs folder, `llms.txt` site, or raw page.
-2. Build a local package once.
-3. Run the MCP server locally.
-4. Let an agent resolve installed sources and query docs with no hosted dependency.
-5. Share the resulting package artifact with another machine without rebuilding from scratch.
+- [Quickstart](docs/guide/quickstart.md)
+- [Architecture](docs/guide/architecture.md)
+- [MCP setup](docs/guide/mcp.md)
+- [CLI reference](docs/reference/cli.md)
+- [MCP tools](docs/reference/mcp-tools.md)
+- [Registry](docs/reference/registry.md)

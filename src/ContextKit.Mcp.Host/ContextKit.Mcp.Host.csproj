@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>groundkit-mcp</ToolCommandName>
+    <PackageId>ContextKit.Mcp</PackageId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ContextKit.Hosting\ContextKit.Hosting.csproj" />
+    <PackageReference Include="Spectre.Console.Cli" />
+    <InternalsVisibleTo Include="ContextKit.Mcp.Tests" />
+  </ItemGroup>
+</Project>

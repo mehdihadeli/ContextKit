@@ -1,6 +1,6 @@
 # Release versioning
 
-GroundKit uses Nerdbank.GitVersioning (NBGV) with GitHub Flow. `main` is the
+ContextKit uses Nerdbank.GitVersioning (NBGV) with GitHub Flow. `main` is the
 long-lived branch. Changes arrive through pull requests, and release tags are
 created only from approved commits on `main`.
 
@@ -56,7 +56,7 @@ monotonically increasing GitHub Actions workflow run number. The date and run
 number make separately built preview or RC artifacts distinguishable; they do
 not replace the NBGV preview or RC ordinal.
 
-GroundKit currently publishes the `GroundKit` CLI package to NuGet.org and
+ContextKit currently publishes the `ContextKit` CLI package to NuGet.org and
 three self-contained archives (`linux-x64`, `osx-x64`, and `osx-arm64`). The
 workflow does not currently publish a Docker image or deploy to an environment;
 the environment names describe release intent and CI permissions.
@@ -178,7 +178,7 @@ Before pushing a release tag, run:
 ```bash
 dotnet tool restore
 dotnet nbgv get-version -v SemVer2
-dotnet test GroundKit.slnx --configuration Release
+dotnet test ContextKit.slnx --configuration Release
 ```
 
 Then inspect `version.json`, confirm the tag was created from the merged
