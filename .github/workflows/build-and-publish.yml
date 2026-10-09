@@ -141,7 +141,7 @@ jobs:
             if [[ "$runtime" == win-* ]]; then
               (cd "$publish_dir" && zip -q "../../artifacts/groundkit-$runtime.zip" ContextKit.Cli.exe)
             else
-              tar -czf "artifacts/groundkit-$runtime.tar.gz" -C "$publish_dir" GroundKit.Cli
+              tar -czf "artifacts/groundkit-$runtime.tar.gz" -C "$publish_dir" ContextKit.Cli
             fi
             bash scripts/package-semantic-provider.sh \
               --runtime "$runtime" \
